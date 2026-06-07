@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { api, Quote } from "@/src/api";
 import { colors, fonts } from "@/src/theme";
 import { StockRow } from "@/src/components/StockRow";
+import { Settings as SettingsIcon } from "lucide-react-native";
 
 export default function Market() {
+  const router = useRouter();
   const [indices, setIndices] = useState<Quote[]>([]);
   const [stocks, setStocks] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,8 +34,13 @@ export default function Market() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header} testID="market-header">
-        <Text style={styles.title}>Indian Markets</Text>
-        <Text style={styles.subtitle}>NSE • BSE • Live Quotes</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Indian Markets</Text>
+          <Text style={styles.subtitle}>NSE • BSE • Live Quotes</Text>
+        </View>
+        <TouchableOpacity testID="open-settings" onPress={() => router.push("/settings")} style={styles.settingsBtn}>
+          <SettingsIcon color={colors.textSecondary} size={20} />
+        </TouchableOpacity>
       </View>
       <ScrollView
         contentContainerStyle={{ paddingBottom: 120 }}
@@ -74,7 +82,8 @@ export default function Market() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
+  header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16, flexDirection: "row", alignItems: "center" },
+  settingsBtn: { padding: 8, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   title: { fontFamily: fonts.heading, color: colors.textPrimary, fontSize: 26 },
   subtitle: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 12, marginTop: 4, letterSpacing: 1 },
   indices: { flexDirection: "row", paddingHorizontal: 12, gap: 10 },

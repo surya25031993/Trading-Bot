@@ -23,6 +23,8 @@ from options import (
     suggest_strategy, calculate_payoff, fetch_option_chain,
     bs_price, bs_greeks, CalcRequest,
 )
+import fyers_integration as fyers_int
+from fastapi.responses import HTMLResponse
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -634,6 +636,105 @@ async def options_calculate(req: CalcRequest):
 async def options_chain(index: str = "NIFTY"):
     """Best-effort NSE option chain (may be blocked from server)."""
     return await asyncio.to_thread(fetch_option_chain, index.upper())
+
+
+# ============ FYERS BROKER INTEGRATION ============
+@api_router.get("/fyers/status")
+async def fyers_status():
+    if not fyers_int.is_configured():
+        return {"configured": False, "connected": False}
+    s = await fyers_int.get_status(db)
+    return {"configured": True, **s}
+
+
+@api_router.get("/fyers/login-url")
+async def fyers_login_url():
+    if not fyers_int.is_configured():
+        raise HTTPException(status_code=400, detail="Fyers not configured")
+    url = fyers_int.get_login_url()
+    return {"login_url": url}
+
+
+@api_router.get("/fyers/callback")
+async def fyers_callback(auth_code: Optional[str] = None, s: Optional[str] = None, code: Optional[str] = None):
+    ac = auth_code or code
+    if not ac or (s and s != "ok"):
+        return HTMLResponse(
+            f"<html><body style='background:#0A0A0A;color:#fff;font-family:sans-serif;padding:32px;text-align:center'>"
+            f"<h2 style='color:#EF4444'>Fyers login failed</h2><p>No auth code received. You can close this window and try again.</p></body></html>"
+        )
+    try:
+        await fyers_int.exchange_auth_code(db, ac)
+    except Exception as e:
+        logger.exception("fyers callback failed")
+        return HTMLResponse(
+            f"<html><body style='background:#0A0A0A;color:#fff;font-family:sans-serif;padding:32px;text-align:center'>"
+            f"<h2 style='color:#EF4444'>Connection failed</h2><p>{e}</p></body></html>"
+        )
+    return HTMLResponse(
+        "<html><body style='background:#0A0A0A;color:#fff;font-family:sans-serif;padding:48px;text-align:center'>"
+        "<h2 style='color:#10B981'>✓ Fyers Connected</h2>"
+        "<p>You can close this window and return to the AlgoBot app.</p>"
+        "<p style='color:#71717A;font-size:13px;margin-top:24px'>Access token valid for 24 hours.</p>"
+        "</body></html>"
+    )
+
+
+@api_router.post("/fyers/disconnect")
+async def fyers_disconnect():
+    return await fyers_int.disconnect(db)
+
+
+@api_router.get("/fyers/profile")
+async def fyers_profile():
+    client = await fyers_int.get_client(db)
+    if not client:
+        raise HTTPException(status_code=401, detail="Fyers not connected. Please re-login.")
+    return await asyncio.to_thread(fyers_int.get_profile_sync, client)
+
+
+@api_router.get("/fyers/funds")
+async def fyers_funds():
+    client = await fyers_int.get_client(db)
+    if not client:
+        raise HTTPException(status_code=401, detail="Fyers not connected. Please re-login.")
+    return await asyncio.to_thread(fyers_int.get_funds_sync, client)
+
+
+@api_router.get("/fyers/holdings")
+async def fyers_holdings():
+    client = await fyers_int.get_client(db)
+    if not client:
+        raise HTTPException(status_code=401, detail="Fyers not connected. Please re-login.")
+    return await asyncio.to_thread(fyers_int.get_holdings_sync, client)
+
+
+@api_router.get("/fyers/positions")
+async def fyers_positions():
+    client = await fyers_int.get_client(db)
+    if not client:
+        raise HTTPException(status_code=401, detail="Fyers not connected. Please re-login.")
+    return await asyncio.to_thread(fyers_int.get_positions_sync, client)
+
+
+@api_router.get("/fyers/option-chain")
+async def fyers_option_chain(index: str = "NIFTY", strike_count: int = 10):
+    client = await fyers_int.get_client(db)
+    if not client:
+        return {"available": False, "reason": "Fyers not connected. Connect from Settings to see live option chain."}
+    return await asyncio.to_thread(fyers_int.fetch_option_chain_sync, client, index, strike_count)
+
+
+@api_router.post("/fyers/orders")
+async def fyers_place_order(order: fyers_int.FyersOrderRequest, live_mode: bool = False):
+    """Place a real order on Fyers. ⚠ live_mode=true required to actually fire — safety check."""
+    if not live_mode:
+        raise HTTPException(status_code=400, detail="SAFETY: Pass live_mode=true to place real order. This is a real-money trade.")
+    client = await fyers_int.get_client(db)
+    if not client:
+        raise HTTPException(status_code=401, detail="Fyers not connected.")
+    result = await asyncio.to_thread(fyers_int.place_order_sync, client, order)
+    return result
 
 
 # Include router

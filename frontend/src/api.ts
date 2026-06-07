@@ -67,6 +67,16 @@ export const api = {
   resetPortfolio: () => req("/portfolio/reset", { method: "POST" }),
   aiAnalyzeUrl: (sym: string) => `${API}/ai/analyze`,
 
+  // ============ Fyers ============
+  fyersStatus: () => req<{ configured: boolean; connected: boolean; access_expires_at?: string; needs_relogin?: boolean }>("/fyers/status"),
+  fyersLoginUrl: () => req<{ login_url: string }>("/fyers/login-url"),
+  fyersDisconnect: () => req("/fyers/disconnect", { method: "POST" }),
+  fyersFunds: () => req<any>("/fyers/funds"),
+  fyersHoldings: () => req<any>("/fyers/holdings"),
+  fyersPositions: () => req<any>("/fyers/positions"),
+  fyersProfile: () => req<any>("/fyers/profile"),
+  fyersOptionChain: (index: string) => req<any>(`/fyers/option-chain?index=${index}`),
+
   // ============ Options ============
   optionsSuggest: (index: string) => req<OptionSuggestion>(`/options/suggest?index=${index}`),
   optionsStrategies: () => req<any[]>("/options/strategies"),

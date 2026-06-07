@@ -45,6 +45,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#0A0A0A" } }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="stock/[symbol]" options={{ presentation: "card" }} />
+        <Stack.Screen name="settings" options={{ presentation: "card" }} />
       </Stack>
     </SafeAreaProvider>
   );

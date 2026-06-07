@@ -26,6 +26,7 @@ Mobile-first algo trading bot for Indian stock market (NSE/BSE). Paper trading +
 - Portfolio: `GET /api/portfolio` · `POST /api/portfolio/reset`
 - AI: `POST /api/ai/analyze` (streams text)
 - **Options: `GET /api/options/strategies` · `/options/suggest?index=` · `POST /api/options/calculate` · `GET /api/options/chain?index=` (best-effort NSE)**
+- **Fyers Broker: `GET /api/fyers/status` · `/login-url` · `/callback` · `POST /api/fyers/disconnect` · `GET /api/fyers/{profile,funds,holdings,positions,option-chain}` · `POST /api/fyers/orders` (live_mode safety toggle)**
 
 ## Important Notes
 - All trades are PAPER (simulated). No real broker connected — no broker API key was provided.
