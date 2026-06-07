@@ -1,0 +1,105 @@
+{
+  "theme": "dark",
+  "archetype": "2 (Performance Pro)",
+  "typography": {
+    "headings": {
+      "fontFamily": "Outfit, sans-serif",
+      "weights": ["600", "700"],
+      "usage": "Use for screen titles, section headers, and important labels."
+    },
+    "body": {
+      "fontFamily": "IBM Plex Sans, sans-serif",
+      "weights": ["400", "500"],
+      "usage": "Use for standard text, descriptions, and list items."
+    },
+    "mono": {
+      "fontFamily": "JetBrains Mono, monospace",
+      "weights": ["500", "700"],
+      "usage": "Use for all live price tickers, percentages, and numerical data."
+    },
+    "scales": {
+      "h1": "text-2xl sm:text-3xl tracking-tight leading-none",
+      "h2": "text-xl sm:text-2xl tracking-tight",
+      "h3": "text-lg sm:text-xl",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "small": "text-xs tracking-wider uppercase",
+      "price_ticker": "text-3xl font-mono tracking-tighter"
+    }
+  },
+  "colors": {
+    "background": {
+      "base": "#0A0A0A",
+      "surface": "#141414",
+      "surface_elevated": "#1A1A1A"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A1A1AA",
+      "muted": "#71717A"
+    },
+    "status": {
+      "profit": "#10B981",
+      "loss": "#EF4444",
+      "neutral": "#3B82F6",
+      "warning": "#F59E0B"
+    },
+    "accent": {
+      "primary": "#007AFF",
+      "primary_hover": "#3B82F6",
+      "border": "#27272A"
+    }
+  },
+  "spacing_and_layout": {
+    "container": "p-4 sm:p-6",
+    "gap": "gap-4",
+    "radius": "rounded-lg",
+    "navigation": "fixed bottom-0 w-full z-50 bg-[#0A0A0A]/90 backdrop-blur-xl border-t border-[#27272A]",
+    "card_style": "bg-[#141414] border border-[#27272A] rounded-lg p-4 shadow-sm"
+  },
+  "components": {
+    "buttons": "rounded-lg font-medium transition-all active:scale-95 text-sm px-4 py-2",
+    "primary_button": "bg-[#007AFF] text-white hover:bg-[#3B82F6]",
+    "action_buy": "bg-[#10B981] text-white font-bold",
+    "action_sell": "bg-[#EF4444] text-white font-bold",
+    "tabs": "flex space-x-2 border-b border-[#27272A] overflow-x-auto no-scrollbar",
+    "list_item": "flex justify-between items-center py-3 border-b border-[#27272A]/50 last:border-0",
+    "charts": "w-full h-48 sm:h-64 mt-4"
+  },
+  "motion_and_interaction": {
+    "hover_states": "hover:bg-[#1A1A1A] transition-colors duration-200",
+    "click_states": "active:scale-[0.98] transition-transform",
+    "price_flash": "animate-pulse"
+  },
+  "accessibility": {
+    "contrast": "Ensure pure white text on Deep Obsidian background for readability.",
+    "testing": "All interactive elements must have data-testid attributes (e.g. data-testid='buy-button')."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "usage": "Use for bottom tabs (Home, Watchlist, Trade, Portfolio, Settings) and UI indicators."
+  },
+  "media": {
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwxfHxzdG9jayUyMG1hcmtldCUyMGNoYXJ0JTIwZGFya3xlbnwwfHx8fDE3ODA4NzI3NDB8MA&ixlib=rb-4.1.0&q=85",
+        "category": "background",
+        "description": "Abstract stock market candlestick chart on dark screen for hero/onboarding."
+      },
+      {
+        "url": "https://images.pexels.com/photos/25587673/pexels-photo-25587673.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "category": "accent",
+        "description": "Bull statue representing a bullish market."
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Build as a mobile-first responsive web app using React and Tailwind.",
+    "Use a persistent bottom tab bar for navigation.",
+    "Implement dense, tabular data lists for watchlists and portfolios.",
+    "Use JetBrains Mono or similar monospaced font for all live prices.",
+    "Color code P&L strictly: text-emerald-500 for profit, text-red-500 for loss.",
+    "Implement the UI directly using Tailwind and standard Shadcn components.",
+    "Ensure the chart area takes priority on the Stock Detail Screen.",
+    "Include 'data-testid' on every button, tab, and list row."
+  ]
+}
