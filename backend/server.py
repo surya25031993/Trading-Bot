@@ -52,7 +52,7 @@ POPULAR_STOCKS = [
     {"symbol": "ASIANPAINT.NS", "name": "Asian Paints"},
     {"symbol": "AXISBANK.NS", "name": "Axis Bank"},
     {"symbol": "MARUTI.NS", "name": "Maruti Suzuki"},
-    {"symbol": "TATAMOTORS.NS", "name": "Tata Motors"},
+    {"symbol": "TATAMOTORS.BO", "name": "Tata Motors"},
     {"symbol": "WIPRO.NS", "name": "Wipro"},
     {"symbol": "BAJFINANCE.NS", "name": "Bajaj Finance"},
     {"symbol": "ADANIENT.NS", "name": "Adani Enterprises"},
