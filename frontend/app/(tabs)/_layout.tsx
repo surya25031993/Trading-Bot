@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Home, Star, TrendingUp, Briefcase, History } from "lucide-react-native";
+import { Home, Star, TrendingUp, Briefcase, Layers, ClipboardList } from "lucide-react-native";
 import { colors, fonts } from "@/src/theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Platform } from "react-native";
@@ -40,6 +40,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="options"
+        options={{
+          title: "Options",
+          tabBarIcon: ({ color, size }) => <Layers color={color} size={size} />,
+          tabBarTestID: "tab-options",
+        }}
+      />
+      <Tabs.Screen
         name="watchlist"
         options={{
           title: "Watchlist",
@@ -59,7 +67,7 @@ export default function TabsLayout() {
         name="history"
         options={{
           title: "History",
-          tabBarIcon: ({ color, size }) => <History color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <ClipboardList color={color} size={size} />,
           tabBarTestID: "tab-history",
         }}
       />

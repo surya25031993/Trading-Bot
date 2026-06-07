@@ -66,4 +66,28 @@ export const api = {
     req<{ ok: boolean; trade: Trade; cash_remaining: number }>("/trades/paper", { method: "POST", body: JSON.stringify(body) }),
   resetPortfolio: () => req("/portfolio/reset", { method: "POST" }),
   aiAnalyzeUrl: (sym: string) => `${API}/ai/analyze`,
+
+  // ============ Options ============
+  optionsSuggest: (index: string) => req<OptionSuggestion>(`/options/suggest?index=${index}`),
+  optionsStrategies: () => req<any[]>("/options/strategies"),
+  optionsCalculate: (body: OptionCalcRequest) => req<OptionCalcResult>("/options/calculate", { method: "POST", body: JSON.stringify(body) }),
+  optionsChain: (index: string) => req<any>(`/options/chain?index=${index}`),
+};
+
+export type OptionLeg = { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium: number; qty: number };
+export type OptionCalcRequest = { index: "NIFTY" | "SENSEX" | "BANKNIFTY"; spot: number; days_to_expiry: number; iv: number; legs: OptionLeg[] };
+export type OptionCalcResult = {
+  lot_size: number; net_premium: number;
+  max_profit: number | null; max_loss: number | null;
+  breakevens: number[];
+  payoff: { spot: number; pnl: number }[];
+  greeks: { delta: number; gamma: number; theta: number; vega: number };
+  probability_of_profit_pct: number | null;
+};
+export type OptionSuggestion = {
+  index: string; spot: number; atm: number; lot_size: number;
+  consensus: "BUY" | "SELL" | "HOLD"; rsi: number; change_pct: number;
+  strategy: { key: string; name: string; view: string; risk: string; reward: string; description: string };
+  concrete_legs: { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium_est: number; qty: number }[];
+  note: string;
 };

@@ -18,6 +18,12 @@ import numpy as np
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
 
+from options import (
+    STRATEGIES, INDEX_SYMBOL, LOT_SIZE,
+    suggest_strategy, calculate_payoff, fetch_option_chain,
+    bs_price, bs_greeks, CalcRequest,
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -52,7 +58,7 @@ POPULAR_STOCKS = [
     {"symbol": "ASIANPAINT.NS", "name": "Asian Paints"},
     {"symbol": "AXISBANK.NS", "name": "Axis Bank"},
     {"symbol": "MARUTI.NS", "name": "Maruti Suzuki"},
-    {"symbol": "TATAMOTORS.BO", "name": "Tata Motors"},
+    {"symbol": "M&M.NS", "name": "Mahindra & Mahindra"},
     {"symbol": "WIPRO.NS", "name": "Wipro"},
     {"symbol": "BAJFINANCE.NS", "name": "Bajaj Finance"},
     {"symbol": "ADANIENT.NS", "name": "Adani Enterprises"},
@@ -567,6 +573,67 @@ async def ai_analyze(body: AIAnalyzeRequest):
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ============ OPTIONS TRADING ============
+@api_router.get("/options/strategies")
+async def options_list_strategies():
+    """List all available option strategy templates."""
+    return [{"key": k, **{kk: vv for kk, vv in v.items() if kk != "legs"}, "legs": v["legs"]} for k, v in STRATEGIES.items()]
+
+
+@api_router.get("/options/suggest")
+async def options_suggest(index: str = "NIFTY"):
+    """Suggest an options strategy based on index technical analysis."""
+    sym = INDEX_SYMBOL.get(index.upper())
+    if not sym:
+        raise HTTPException(status_code=400, detail=f"Unknown index. Try NIFTY, SENSEX, BANKNIFTY.")
+    q = await asyncio.to_thread(fetch_quote, sym)
+    df = await asyncio.to_thread(fetch_history, sym, "6mo", "1d")
+    if df.empty:
+        raise HTTPException(status_code=503, detail="Index data unavailable")
+    ind = await asyncio.to_thread(compute_indicators, df)
+    if "error" in ind:
+        raise HTTPException(status_code=503, detail=ind["error"])
+    strat = suggest_strategy(ind["consensus"], ind["indicators"]["rsi"], q["change_pct"])
+    # Build concrete legs with strike numbers around ATM (rounded to 50 for NIFTY, 100 for BANKNIFTY, 100 for SENSEX)
+    spot = q["price"]
+    step = 100 if index.upper() in ("BANKNIFTY", "SENSEX") else 50
+    atm = round(spot / step) * step
+    concrete_legs = []
+    for leg in strat["legs"]:
+        strike = atm + leg["strike_offset"]
+        # Estimate premium via Black-Scholes with ~15% IV, 7 days to expiry
+        T = 7 / 365.0
+        prem = bs_price(spot, strike, T, 0.07, 0.15, leg["type"])
+        concrete_legs.append({
+            "side": leg["side"], "type": leg["type"], "strike": strike,
+            "premium_est": round(prem, 2), "qty": leg["qty"],
+        })
+    return {
+        "index": index.upper(),
+        "spot": spot,
+        "atm": atm,
+        "lot_size": LOT_SIZE.get(index.upper(), 75),
+        "consensus": ind["consensus"],
+        "rsi": ind["indicators"]["rsi"],
+        "change_pct": q["change_pct"],
+        "strategy": strat,
+        "concrete_legs": concrete_legs,
+        "note": "Premium estimates use Black-Scholes (15% IV, weekly expiry). Use NSE option chain for live prices.",
+    }
+
+
+@api_router.post("/options/calculate")
+async def options_calculate(req: CalcRequest):
+    """Compute payoff diagram, greeks, breakevens for an options strategy."""
+    return calculate_payoff(req)
+
+
+@api_router.get("/options/chain")
+async def options_chain(index: str = "NIFTY"):
+    """Best-effort NSE option chain (may be blocked from server)."""
+    return await asyncio.to_thread(fetch_option_chain, index.upper())
 
 
 # Include router
