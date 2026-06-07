@@ -1,27 +1,51 @@
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
+import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  useFonts as useIBMPlex,
+  IBMPlexSans_400Regular,
+  IBMPlexSans_500Medium,
+  IBMPlexSans_600SemiBold,
+} from "@expo-google-fonts/ibm-plex-sans";
+import {
+  JetBrainsMono_500Medium,
+  JetBrainsMono_700Bold,
+} from "@expo-google-fonts/jetbrains-mono";
+import { Outfit_600SemiBold, Outfit_700Bold } from "@expo-google-fonts/outfit";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 
-// Keep the native splash visible from cold start until icon fonts register.
-// Required because @expo/vector-icons' componentDidMount fallback fires
-// Font.loadAsync against a broken vendor path if any <Icon> mounts before
-// the family is registered — which throws on Android Expo Go.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const [loaded, error] = useIconFonts();
+  const [iconsLoaded, iconsError] = useIconFonts();
+  const [fontsLoaded] = useIBMPlex({
+    IBMPlexSans_400Regular,
+    IBMPlexSans_500Medium,
+    IBMPlexSans_600SemiBold,
+    JetBrainsMono_500Medium,
+    JetBrainsMono_700Bold,
+    Outfit_600SemiBold,
+    Outfit_700Bold,
+  });
 
   useEffect(() => {
-    if (loaded || error) {
+    if ((iconsLoaded || iconsError) && fontsLoaded) {
       SplashScreen.hideAsync();
     }
-  }, [loaded, error]);
+  }, [iconsLoaded, iconsError, fontsLoaded]);
 
-  // If the CDN is unreachable we fall through on error rather than wedging
-  // the app — icons will tofu, but the app still boots.
-  if (!loaded && !error) return null;
+  if ((!iconsLoaded && !iconsError) || !fontsLoaded) return null;
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <SafeAreaProvider>
+      <StatusBar style="light" />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#0A0A0A" } }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="stock/[symbol]" options={{ presentation: "card" }} />
+      </Stack>
+    </SafeAreaProvider>
+  );
 }

@@ -1,0 +1,1 @@
+{"dependencies":[],"output":[{"data":{"code":"__d(function (global, require, _$$_IMPORT_DEFAULT, _$$_IMPORT_ALL, module, exports, _dependencyMap) {\n  module.exports = \"/assets/node_modules/@expo-google-fonts/outfit/700Bold/Outfit_700Bold.91486df4e5279497efb060b0d3cc797b.ttf\";\n});","lineCount":3,"map":[[3,3]],"functionMap":null,"hasCjsExports":true},"type":"js/module/asset"}]}

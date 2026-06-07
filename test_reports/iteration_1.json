@@ -1,0 +1,43 @@
+{
+  "summary": "Full backend + frontend smoke test for Algo Trading Bot. All 10 backend pytest cases passed (100%). All 5 tabs render correctly in Expo web preview with live yfinance data, AI streaming works, paper trading flow (buy/sell/insufficient cash/over-sell) validated, watchlist CRUD validated.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/stocks/popular & /signals/top", "issue": "TATAMOTORS.NS occasionally returns 'Data unavailable' from yfinance (Yahoo reports symbol delisted/404). Backend handles gracefully (returns price=0 / skips in signals). Suggest using TATAMOTORS.BO fallback or removing from list if persistent."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "TouchableOpacity (or View) in tabs", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — non-blocking but should be migrated."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_algo_bot.py",
+    "/app/test_reports/pytest/iteration_1.xml"
+  ],
+  "action_items": [
+    "Optional: Replace TATAMOTORS.NS with TATAMOTORS.BO or guard the popular list against persistent yfinance 404s.",
+    "Optional: Update pointerEvents prop to style.pointerEvents to silence deprecation warning.",
+    "Consider adding more testID attributes on tab bar items, stock rows, BUY/SELL/Run buttons and watchlist + button for more robust future automation (currently we relied on visible text which works)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is a single 587-line file mixing models, indicator math, market data, watchlist, paper trading and AI streaming. Consider splitting into routers/services modules as it grows.",
+    "compute_indicators uses pandas .rolling without min_periods; latest values can be NaN-coerced via fallback, which is fine but signal generation reads sma50.iloc[-2] without NaN guard for short histories (could KeyError on very short series). Mitigated because endpoint requests 6mo history.",
+    "Module-level _quote_cache is a plain dict (not thread-safe) — acceptable for single uvicorn worker but flag for scaling.",
+    "POSITIVE: Proper async wrapping of blocking yfinance calls with asyncio.to_thread + semaphore; MongoDB _id correctly excluded; HTTP 400 for business errors; env vars used via os.environ['..']."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_algo_bot.py (new)",
+    "/app/test_reports/pytest/iteration_1.xml (new)",
+    "/app/test_reports/iteration_1.json (new)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% smoke (5/5 tabs + nav)"},
+  "seed_data_creation": "Test fixture creates and cleans up TEST.NS in watchlist, and resets portfolio before/after paper trade tests so no residual data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend public URL via EXPO_PUBLIC_BACKEND_URL. yfinance is occasionally flaky for individual NSE symbols (notably TATAMOTORS.NS); tests are written tolerant (skip on 404) and core flows use RELIANCE.NS which is reliable. Paper trading uses single default_user with ₹10L starting cash — reset endpoint must be called before deterministic tests. AI /api/ai/analyze is a Server-Sent Events style text/event-stream; consume with stream=True.",
+  "rca_of_issue": "No blocking issues found. TATAMOTORS.NS warning in backend logs is a Yahoo Finance upstream data hiccup (symbol intermittently 404), not an app bug. Backend already returns a safe 'Data unavailable' shape so UI continues to render. Recommended mitigation: swap to .BO suffix or hide row when price==0."
+}
