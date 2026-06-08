@@ -91,6 +91,7 @@ export const api = {
   botSetConfig: (updates: any) => req("/bot/config", { method: "POST", body: JSON.stringify(updates) }),
   botDecisions: (limit = 50) => req<any[]>(`/bot/decisions?limit=${limit}`),
   botClearDecisions: () => req("/bot/decisions", { method: "DELETE" }),
+  botStats: () => req<any>("/bot/stats"),
 };
 
 export type OptionLeg = { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium: number; qty: number };

@@ -789,6 +789,71 @@ async def bot_clear_decisions():
     return {"ok": True}
 
 
+@api_router.get("/bot/stats")
+async def bot_stats():
+    """Compute win rate, avg P&L, best/worst symbol from completed round-trip trades."""
+    trades = await db.trades.find({"user_id": DEFAULT_USER}, {"_id": 0}).sort("timestamp", 1).to_list(2000)
+    # Pair BUY → matching SELL on same symbol (FIFO)
+    open_lots: dict[str, list] = {}
+    completed: list[dict] = []
+    for t in trades:
+        sym = t["symbol"]
+        if t["side"] == "BUY":
+            open_lots.setdefault(sym, []).append(t)
+        else:  # SELL
+            qty_left = t["quantity"]
+            while qty_left > 0 and open_lots.get(sym):
+                buy = open_lots[sym][0]
+                take = min(qty_left, buy["quantity"])
+                pnl = (t["price"] - buy["price"]) * take
+                completed.append({
+                    "symbol": sym, "name": t.get("name", sym),
+                    "buy_price": buy["price"], "sell_price": t["price"],
+                    "qty": take, "pnl": round(pnl, 2),
+                    "pct": round((t["price"] - buy["price"]) / buy["price"] * 100, 2) if buy["price"] else 0,
+                    "buy_time": buy["timestamp"], "sell_time": t["timestamp"],
+                })
+                buy["quantity"] -= take
+                qty_left -= take
+                if buy["quantity"] == 0:
+                    open_lots[sym].pop(0)
+
+    if not completed:
+        return {
+            "completed_trades": 0, "wins": 0, "losses": 0, "win_rate": 0,
+            "total_pnl": 0, "avg_pnl": 0, "avg_win": 0, "avg_loss": 0,
+            "best_trade": None, "worst_trade": None,
+            "by_symbol": [],
+        }
+
+    wins = [c for c in completed if c["pnl"] > 0]
+    losses = [c for c in completed if c["pnl"] < 0]
+    total_pnl = sum(c["pnl"] for c in completed)
+    by_sym: dict[str, dict] = {}
+    for c in completed:
+        s = by_sym.setdefault(c["symbol"], {"symbol": c["symbol"], "name": c["name"], "trades": 0, "pnl": 0.0, "wins": 0})
+        s["trades"] += 1
+        s["pnl"] += c["pnl"]
+        if c["pnl"] > 0:
+            s["wins"] += 1
+    by_symbol = sorted(
+        [{**v, "pnl": round(v["pnl"], 2), "win_rate": round(v["wins"] / v["trades"] * 100, 1)} for v in by_sym.values()],
+        key=lambda r: -r["pnl"],
+    )
+    return {
+        "completed_trades": len(completed),
+        "wins": len(wins), "losses": len(losses),
+        "win_rate": round(len(wins) / len(completed) * 100, 1),
+        "total_pnl": round(total_pnl, 2),
+        "avg_pnl": round(total_pnl / len(completed), 2),
+        "avg_win": round(sum(c["pnl"] for c in wins) / len(wins), 2) if wins else 0,
+        "avg_loss": round(sum(c["pnl"] for c in losses) / len(losses), 2) if losses else 0,
+        "best_trade": max(completed, key=lambda c: c["pnl"]),
+        "worst_trade": min(completed, key=lambda c: c["pnl"]),
+        "by_symbol": by_symbol,
+    }
+
+
 # Include router
 app.include_router(api_router)
 

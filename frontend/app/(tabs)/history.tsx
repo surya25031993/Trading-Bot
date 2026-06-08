@@ -3,20 +3,41 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "@/src/api";
 import { colors, fonts } from "@/src/theme";
-import { Bot, Play, Square, Zap, AlertTriangle, Edit3, TrendingUp, TrendingDown, Minus, Trash2 } from "lucide-react-native";
+import { Bot, Play, Square, Zap, AlertTriangle, Edit3, TrendingUp, TrendingDown, Minus, Trash2, Trophy, Target } from "lucide-react-native";
 import { BotConfigEditor } from "@/src/components/BotConfigEditor";
+import { ToastContainer, Toast } from "@/src/components/Toast";
 
 export default function BotScreen() {
   const [status, setStatus] = useState<any>(null);
   const [decisions, setDecisions] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const lastTradeIdRef = React.useRef<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [s, d] = await Promise.all([api.botStatus(), api.botDecisions(30)]);
+      const [s, d, st] = await Promise.all([api.botStatus(), api.botDecisions(30), api.botStats()]);
       setStatus(s);
+      setStats(st);
+      // Detect new trade decisions (BUY/SELL with quantity) → toast
+      const newTrades = d.filter((x: any) => (x.action === "BUY" || x.action === "SELL") && x.qty > 0);
+      if (newTrades.length && lastTradeIdRef.current !== null) {
+        const newest = newTrades[0];
+        const newestKey = `${newest.timestamp}-${newest.symbol}`;
+        if (lastTradeIdRef.current !== newestKey) {
+          // Push toast for the new trade
+          setToasts((prev) => [
+            ...prev,
+            { id: Date.now(), side: newest.action, symbol: newest.symbol, qty: newest.qty, price: newest.price },
+          ]);
+        }
+        lastTradeIdRef.current = newestKey;
+      } else if (newTrades.length && lastTradeIdRef.current === null) {
+        lastTradeIdRef.current = `${newTrades[0].timestamp}-${newTrades[0].symbol}`;
+      }
       setDecisions(d);
     } catch (e) {
       console.warn(e);
@@ -24,6 +45,8 @@ export default function BotScreen() {
       setLoading(false);
     }
   }, []);
+
+  const dismissToast = (id: number) => setToasts((prev) => prev.filter((t) => t.id !== id));
 
   useEffect(() => {
     load();
@@ -76,7 +99,7 @@ export default function BotScreen() {
   }
 
   const running = status.running;
-  const stats = status.stats || {};
+  const statsRuntime = status.stats || {};
   const cfg = status.config || {};
 
   return (
@@ -124,23 +147,95 @@ export default function BotScreen() {
         <View style={styles.statsCard}>
           <Text style={styles.cardTitle}>Today's Activity</Text>
           <View style={styles.statsGrid}>
-            <Stat label="Scans" value={stats.scans} />
-            <Stat label="Buys" value={stats.buy_orders} color={colors.profit} />
-            <Stat label="Sells" value={stats.sell_orders} color={colors.loss} />
-            <Stat label="Errors" value={stats.errors} color={stats.errors ? colors.warning : colors.textMuted} />
+            <Stat label="Scans" value={statsRuntime.scans} />
+            <Stat label="Buys" value={statsRuntime.buy_orders} color={colors.profit} />
+            <Stat label="Sells" value={statsRuntime.sell_orders} color={colors.loss} />
+            <Stat label="Errors" value={statsRuntime.errors} color={statsRuntime.errors ? colors.warning : colors.textMuted} />
           </View>
           {status.last_tick && (
             <Text style={styles.lastTick}>
               Last scan: {new Date(status.last_tick).toLocaleTimeString("en-IN")}
             </Text>
           )}
-          {stats.last_error && (
+          {statsRuntime.last_error && (
             <View style={styles.errorBox}>
               <AlertTriangle color={colors.warning} size={14} />
-              <Text style={styles.errorText}>{stats.last_error}</Text>
+              <Text style={styles.errorText}>{statsRuntime.last_error}</Text>
             </View>
           )}
         </View>
+
+        {/* Stats Dashboard */}
+        {stats && stats.completed_trades > 0 && (
+          <View style={styles.statsCard} testID="stats-dashboard">
+            <Text style={styles.cardTitle}>Performance ({stats.completed_trades} closed trades)</Text>
+            <View style={styles.bigStats}>
+              <View style={styles.bigStat}>
+                <Text style={styles.bigStatLabel}>WIN RATE</Text>
+                <Text style={[styles.bigStatVal, { color: stats.win_rate >= 50 ? colors.profit : colors.loss }]}>
+                  {stats.win_rate}%
+                </Text>
+                <Text style={styles.bigStatSub}>{stats.wins}W / {stats.losses}L</Text>
+              </View>
+              <View style={styles.bigStat}>
+                <Text style={styles.bigStatLabel}>TOTAL P&L</Text>
+                <Text style={[styles.bigStatVal, { color: stats.total_pnl >= 0 ? colors.profit : colors.loss }]}>
+                  {stats.total_pnl >= 0 ? "+" : ""}₹{Number(stats.total_pnl).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                </Text>
+                <Text style={styles.bigStatSub}>avg ₹{Number(stats.avg_pnl).toLocaleString("en-IN", { maximumFractionDigits: 0 })}/trade</Text>
+              </View>
+            </View>
+
+            <View style={styles.miniStats}>
+              <View style={styles.miniStat}>
+                <Text style={styles.miniLabel}>Avg Win</Text>
+                <Text style={[styles.miniVal, { color: colors.profit }]}>+₹{Number(stats.avg_win).toFixed(0)}</Text>
+              </View>
+              <View style={styles.miniStat}>
+                <Text style={styles.miniLabel}>Avg Loss</Text>
+                <Text style={[styles.miniVal, { color: colors.loss }]}>₹{Number(stats.avg_loss).toFixed(0)}</Text>
+              </View>
+            </View>
+
+            {stats.best_trade && (
+              <View style={styles.tradeHighlight}>
+                <Trophy color={colors.profit} size={14} />
+                <View style={{ flex: 1, marginLeft: 8 }}>
+                  <Text style={styles.tradeHighlightLabel}>BEST TRADE</Text>
+                  <Text style={styles.tradeHighlightText}>
+                    {stats.best_trade.symbol.replace(".NS", "")} · +₹{stats.best_trade.pnl.toFixed(0)} ({stats.best_trade.pct.toFixed(2)}%)
+                  </Text>
+                </View>
+              </View>
+            )}
+            {stats.worst_trade && stats.worst_trade.pnl < 0 && (
+              <View style={[styles.tradeHighlight, { backgroundColor: colors.loss + "11", borderColor: colors.loss + "44" }]}>
+                <Target color={colors.loss} size={14} />
+                <View style={{ flex: 1, marginLeft: 8 }}>
+                  <Text style={styles.tradeHighlightLabel}>WORST TRADE</Text>
+                  <Text style={styles.tradeHighlightText}>
+                    {stats.worst_trade.symbol.replace(".NS", "")} · ₹{stats.worst_trade.pnl.toFixed(0)} ({stats.worst_trade.pct.toFixed(2)}%)
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {stats.by_symbol?.length > 0 && (
+              <View style={{ marginTop: 14 }}>
+                <Text style={styles.bySymTitle}>By Symbol</Text>
+                {stats.by_symbol.slice(0, 5).map((s: any) => (
+                  <View key={s.symbol} style={styles.bySymRow} testID={`bysym-${s.symbol.replace(".NS", "")}`}>
+                    <Text style={styles.bySymName}>{s.symbol.replace(".NS", "")}</Text>
+                    <Text style={styles.bySymMeta}>{s.trades} trades · {s.win_rate}% win</Text>
+                    <Text style={[styles.bySymPnl, { color: s.pnl >= 0 ? colors.profit : colors.loss }]}>
+                      {s.pnl >= 0 ? "+" : ""}₹{Number(s.pnl).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Config */}
         <View style={styles.statsCard}>
@@ -219,6 +314,7 @@ export default function BotScreen() {
         onClose={() => setEditorOpen(false)}
         onSaved={load}
       />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </SafeAreaView>
   );
 }
@@ -266,6 +362,23 @@ const styles = StyleSheet.create({
   decisionPrice: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 11 },
   decisionReason: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, marginTop: 1 },
   decisionTime: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 10 },
+  bigStats: { flexDirection: "row", gap: 10 },
+  bigStat: { flex: 1, backgroundColor: colors.bg, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  bigStatLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 9, letterSpacing: 1.5 },
+  bigStatVal: { fontFamily: fonts.monoBold, color: colors.textPrimary, fontSize: 22, marginTop: 4 },
+  bigStatSub: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 10, marginTop: 2 },
+  miniStats: { flexDirection: "row", gap: 10, marginTop: 10 },
+  miniStat: { flex: 1, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: colors.bg, borderRadius: 8, borderWidth: 1, borderColor: colors.border, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  miniLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 11 },
+  miniVal: { fontFamily: fonts.monoBold, fontSize: 12 },
+  tradeHighlight: { flexDirection: "row", alignItems: "center", backgroundColor: colors.profit + "11", borderWidth: 1, borderColor: colors.profit + "44", padding: 10, borderRadius: 10, marginTop: 10 },
+  tradeHighlightLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 9, letterSpacing: 1.5 },
+  tradeHighlightText: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 12, marginTop: 2 },
+  bySymTitle: { fontFamily: fonts.bodySemi, color: colors.textSecondary, fontSize: 11, marginBottom: 6, letterSpacing: 1 },
+  bySymRow: { flexDirection: "row", alignItems: "center", paddingVertical: 7, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  bySymName: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 12, width: 80 },
+  bySymMeta: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 10, flex: 1 },
+  bySymPnl: { fontFamily: fonts.monoBold, fontSize: 12 },
   statsGrid: { flexDirection: "row", gap: 8 },
   statCell: { flex: 1, backgroundColor: colors.bg, borderRadius: 8, padding: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
   statLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, letterSpacing: 1 },
