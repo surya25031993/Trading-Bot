@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { api, IndicatorData, Quote } from "@/src/api";
 import { colors, fonts, API } from "@/src/theme";
 import { LineChart } from "@/src/components/LineChart";
+import { AdvancedChart, ChartData } from "@/src/components/AdvancedChart";
 import { ArrowLeft, Sparkles, Star } from "lucide-react-native";
 
 type TradeSide = "BUY" | "SELL";
@@ -20,6 +21,7 @@ export default function StockDetail() {
 
   const [quote, setQuote] = useState<Quote | null>(null);
   const [chart, setChart] = useState<{ close: number }[]>([]);
+  const [advChart, setAdvChart] = useState<ChartData | null>(null);
   const [ind, setInd] = useState<IndicatorData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -33,10 +35,15 @@ export default function StockDetail() {
 
   const load = useCallback(async () => {
     try {
-      const [d, s] = await Promise.all([api.stockDetail(symbol), api.stockSignals(symbol).catch(() => null)]);
+      const [d, s, c] = await Promise.all([
+        api.stockDetail(symbol),
+        api.stockSignals(symbol).catch(() => null),
+        api.stockChart(symbol).catch(() => null),
+      ]);
       setQuote(d.quote);
       setChart(d.chart.map((c) => ({ close: c.close })));
       if (s) setInd(s);
+      if (c) setAdvChart(c);
     } catch (e) {
       console.warn(e);
     } finally {
@@ -142,8 +149,8 @@ export default function StockDetail() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>60-Day Price Chart</Text>
-          <LineChart data={chart} color={positive ? colors.profit : colors.loss} />
+          <Text style={styles.cardTitle}>Technical Charts · All Indicators</Text>
+          {advChart ? <AdvancedChart data={advChart} /> : <LineChart data={chart} color={positive ? colors.profit : colors.loss} />}
         </View>
 
         {ind && (

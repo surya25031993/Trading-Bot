@@ -972,6 +972,55 @@ async def options_paper_trade(body: dict):
     return {"ok": all(p.get("ok") for p in placed), "placed": placed}
 
 
+@api_router.get("/stocks/{symbol}/chart")
+async def stock_chart(symbol: str, period: str = "3mo"):
+    """Return chart data + all indicator series for plotting."""
+    df = await asyncio.to_thread(fetch_history, symbol, period, "1d")
+    if df.empty:
+        raise HTTPException(status_code=404, detail="No data")
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    # SMA / Bollinger
+    sma20 = close.rolling(20).mean()
+    sma50 = close.rolling(50).mean()
+    bb_mid = close.rolling(20).mean()
+    bb_std = close.rolling(20).std()
+    bb_upper = bb_mid + 2 * bb_std
+    bb_lower = bb_mid - 2 * bb_std
+    # RSI
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    macd_hist = macd - signal
+    # Take last 60 points
+    tail = 60
+    dates = [d.strftime("%Y-%m-%d") for d in df.index[-tail:]]
+    def safe_list(s):
+        return [None if np.isnan(v) else round(float(v), 2) for v in s.iloc[-tail:]]
+    return {
+        "dates": dates,
+        "close": safe_list(close),
+        "high": safe_list(high),
+        "low": safe_list(low),
+        "sma20": safe_list(sma20),
+        "sma50": safe_list(sma50),
+        "bb_upper": safe_list(bb_upper),
+        "bb_lower": safe_list(bb_lower),
+        "rsi": safe_list(rsi),
+        "macd": safe_list(macd),
+        "macd_signal": safe_list(signal),
+        "macd_hist": safe_list(macd_hist),
+    }
+
+
 # Include router
 app.include_router(api_router)
 
