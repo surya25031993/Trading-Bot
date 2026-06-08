@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Alert, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Alert, Platform, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { api } from "@/src/api";
@@ -13,6 +13,7 @@ export default function Settings() {
   const [funds, setFunds] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [showDisconnect, setShowDisconnect] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -72,15 +73,18 @@ export default function Settings() {
     }
   };
 
-  const disconnect = () => {
-    Alert.alert("Disconnect Fyers?", "Your access token will be removed. You can reconnect anytime.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Disconnect", style: "destructive", onPress: async () => {
-        await api.fyersDisconnect();
-        setStatus({ configured: true, connected: false });
-        setProfile(null); setFunds(null);
-      }},
-    ]);
+  const disconnect = () => setShowDisconnect(true);
+
+  const confirmDisconnect = async () => {
+    setShowDisconnect(false);
+    try {
+      await api.fyersDisconnect();
+      setStatus({ configured: true, connected: false });
+      setProfile(null);
+      setFunds(null);
+    } catch (e: any) {
+      console.warn("Disconnect failed", e);
+    }
   };
 
   const fundsLine = Array.isArray(funds) ? funds.find((f: any) => f.title?.toLowerCase().includes("available") || f.id === 10) : null;
@@ -177,6 +181,25 @@ export default function Settings() {
           ⚠ This app is for educational and informational purposes. Trading involves substantial risk of loss. Past performance does not guarantee future results. Never invest more than you can afford to lose.
         </Text>
       </ScrollView>
+
+      <Modal visible={showDisconnect} transparent animationType="fade" onRequestClose={() => setShowDisconnect(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard} testID="disconnect-modal">
+            <Text style={styles.modalTitle}>Disconnect Fyers?</Text>
+            <Text style={styles.modalBody}>
+              Your access token will be removed. You can reconnect anytime, but you'll lose real-time prices and option chain until you do.
+            </Text>
+            <View style={styles.modalBtns}>
+              <TouchableOpacity testID="cancel-disconnect" onPress={() => setShowDisconnect(false)} style={[styles.modalBtn, { backgroundColor: colors.surfaceElev }]}>
+                <Text style={[styles.modalBtnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="confirm-disconnect" onPress={confirmDisconnect} style={[styles.modalBtn, { backgroundColor: colors.loss }]}>
+                <Text style={styles.modalBtnText}>Disconnect</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -207,4 +230,11 @@ const styles = StyleSheet.create({
   cashLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, letterSpacing: 2 },
   cashVal: { fontFamily: fonts.monoBold, color: colors.profit, fontSize: 22, marginTop: 4 },
   disclaimer: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 11, lineHeight: 17, padding: 20, textAlign: "center" },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center", padding: 20 },
+  modalCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 24, borderWidth: 1, borderColor: colors.border, maxWidth: 420, width: "100%" },
+  modalTitle: { fontFamily: fonts.heading, color: colors.textPrimary, fontSize: 20, textAlign: "center" },
+  modalBody: { fontFamily: fonts.body, color: colors.textSecondary, fontSize: 13, marginTop: 12, lineHeight: 20, textAlign: "center" },
+  modalBtns: { flexDirection: "row", gap: 10, marginTop: 20 },
+  modalBtn: { flex: 1, paddingVertical: 14, borderRadius: 10, alignItems: "center" },
+  modalBtnText: { fontFamily: fonts.bodySemi, color: "#fff", fontSize: 14 },
 });
