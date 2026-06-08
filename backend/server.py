@@ -772,6 +772,23 @@ async def bot_set_config(updates: dict):
     return bot_service.set_config(updates)
 
 
+@api_router.get("/bot/decisions")
+async def bot_decisions(limit: int = 50):
+    in_mem = bot_service.get_decisions(limit)
+    if in_mem:
+        return in_mem
+    # Fallback: load from MongoDB if backend just restarted
+    docs = await db.bot_decisions.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit).to_list(limit)
+    return docs
+
+
+@api_router.delete("/bot/decisions")
+async def bot_clear_decisions():
+    await db.bot_decisions.delete_many({})
+    bot_service._decisions.clear()
+    return {"ok": True}
+
+
 # Include router
 app.include_router(api_router)
 

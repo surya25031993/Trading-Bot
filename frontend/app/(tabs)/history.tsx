@@ -3,17 +3,21 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "@/src/api";
 import { colors, fonts } from "@/src/theme";
-import { Bot, Play, Square, Zap, AlertTriangle } from "lucide-react-native";
+import { Bot, Play, Square, Zap, AlertTriangle, Edit3, TrendingUp, TrendingDown, Minus, Trash2 } from "lucide-react-native";
+import { BotConfigEditor } from "@/src/components/BotConfigEditor";
 
 export default function BotScreen() {
   const [status, setStatus] = useState<any>(null);
+  const [decisions, setDecisions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const s = await api.botStatus();
+      const [s, d] = await Promise.all([api.botStatus(), api.botDecisions(30)]);
       setStatus(s);
+      setDecisions(d);
     } catch (e) {
       console.warn(e);
     } finally {
@@ -140,9 +144,15 @@ export default function BotScreen() {
 
         {/* Config */}
         <View style={styles.statsCard}>
-          <Text style={styles.cardTitle}>Strategy Config</Text>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>Strategy Config</Text>
+            <TouchableOpacity testID="edit-config" onPress={() => setEditorOpen(true)} style={styles.editBtn}>
+              <Edit3 color={colors.accent} size={14} />
+              <Text style={styles.editBtnText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.cfgList}>
-            <Cfg label="Watched stocks" value={`${cfg.symbols?.length || 0}: ${(cfg.symbols || []).map((s: string) => s.replace(".NS", "")).join(", ")}`} />
+            <Cfg label="Watched stocks" value={`${cfg.symbols?.length || 0}: ${(cfg.symbols || []).slice(0, 4).map((s: string) => s.replace(".NS", "")).join(", ")}${(cfg.symbols?.length || 0) > 4 ? "…" : ""}`} />
             <Cfg label="Scan interval" value={`${cfg.interval_seconds}s (${Math.round(cfg.interval_seconds/60)} min)`} />
             <Cfg label="Buy when" value={`≥ ${cfg.min_buy_signals} of 5 algos say BUY`} />
             <Cfg label="Sell when" value={`≥ ${cfg.min_sell_signals} of 5 algos say SELL`} />
@@ -151,6 +161,41 @@ export default function BotScreen() {
             <Cfg label="Auto stop-loss" value={`-${cfg.stop_loss_pct}%`} />
             <Cfg label="Auto take-profit" value={`+${cfg.take_profit_pct}%`} />
           </View>
+        </View>
+
+        {/* Decision Log */}
+        <View style={styles.statsCard}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>Decision Log ({decisions.length})</Text>
+            {decisions.length > 0 && (
+              <TouchableOpacity testID="clear-log" onPress={async () => { await api.botClearDecisions(); load(); }} style={styles.editBtn}>
+                <Trash2 color={colors.loss} size={12} />
+                <Text style={[styles.editBtnText, { color: colors.loss }]}>Clear</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {decisions.length === 0 ? (
+            <Text style={styles.empty}>No decisions yet. Start the bot to see scan results.</Text>
+          ) : (
+            decisions.slice(0, 15).map((d, i) => {
+              const Icon = d.action === "BUY" ? TrendingUp : d.action === "SELL" ? TrendingDown : Minus;
+              const color = d.action === "BUY" ? colors.profit : d.action === "SELL" ? colors.loss : colors.textMuted;
+              const time = new Date(d.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+              return (
+                <View key={i} style={styles.decisionRow} testID={`decision-${i}`}>
+                  <View style={[styles.decisionBadge, { borderColor: color, backgroundColor: color + "22" }]}>
+                    <Icon color={color} size={11} />
+                    <Text style={[styles.decisionBadgeText, { color }]}>{d.action}</Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.decisionSym}>{(d.symbol || "").replace(".NS", "")} <Text style={styles.decisionPrice}>₹{(d.price || 0).toFixed(2)}</Text></Text>
+                    <Text style={styles.decisionReason} numberOfLines={1}>{d.reason}</Text>
+                  </View>
+                  <Text style={styles.decisionTime}>{time}</Text>
+                </View>
+              );
+            })
+          )}
         </View>
 
         {/* Info */}
@@ -167,6 +212,13 @@ export default function BotScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      <BotConfigEditor
+        visible={editorOpen}
+        initial={cfg}
+        onClose={() => setEditorOpen(false)}
+        onSaved={load}
+      />
     </SafeAreaView>
   );
 }
@@ -203,6 +255,17 @@ const styles = StyleSheet.create({
   bigBtnText: { fontFamily: fonts.bodySemi, color: "#fff", fontSize: 14 },
   statsCard: { marginHorizontal: 12, marginTop: 12, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14 },
   cardTitle: { fontFamily: fonts.headingSemi, color: colors.textPrimary, fontSize: 14, marginBottom: 10 },
+  cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  editBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: colors.border },
+  editBtnText: { fontFamily: fonts.bodySemi, color: colors.accent, fontSize: 11 },
+  empty: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 12, padding: 16, textAlign: "center" },
+  decisionRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  decisionBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 5, borderWidth: 1, minWidth: 52, justifyContent: "center" },
+  decisionBadgeText: { fontFamily: fonts.bodySemi, fontSize: 10 },
+  decisionSym: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 12 },
+  decisionPrice: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 11 },
+  decisionReason: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, marginTop: 1 },
+  decisionTime: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 10 },
   statsGrid: { flexDirection: "row", gap: 8 },
   statCell: { flex: 1, backgroundColor: colors.bg, borderRadius: 8, padding: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
   statLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, letterSpacing: 1 },

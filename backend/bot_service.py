@@ -32,6 +32,24 @@ _config = {
     "fixed_qty": 1,
 }
 
+# In-memory decision log (last 200 entries)
+_decisions: list = []
+
+
+async def _log_decision(db, entry: dict):
+    entry["timestamp"] = datetime.now(timezone.utc).isoformat()
+    _decisions.insert(0, entry)
+    if len(_decisions) > 200:
+        del _decisions[200:]
+    try:
+        await db.bot_decisions.insert_one(entry.copy())
+    except Exception as e:
+        logger.warning(f"Failed to persist decision: {e}")
+
+
+def get_decisions(limit: int = 50) -> list:
+    return _decisions[:limit]
+
 
 def get_config() -> dict:
     return dict(_config)
@@ -107,11 +125,30 @@ async def _bot_loop(db, server_module):
                         qty = _calc_qty(price)
                         if qty > 0:
                             await _execute_trade(db, server_module, symbol, "BUY", qty, price, ind)
+                            await _log_decision(db, {
+                                "symbol": symbol, "action": "BUY", "price": price, "qty": qty,
+                                "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
+                                "rsi": ind["indicators"]["rsi"],
+                                "reason": f"{ind['buy_count']}/5 algos BUY",
+                            })
                             today_trade_count += 1
                     elif ind["sell_count"] >= _config["min_sell_signals"] and has_pos:
                         held_qty = positions[symbol]["quantity"]
                         await _execute_trade(db, server_module, symbol, "SELL", held_qty, price, ind)
+                        await _log_decision(db, {
+                            "symbol": symbol, "action": "SELL", "price": price, "qty": held_qty,
+                            "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
+                            "rsi": ind["indicators"]["rsi"],
+                            "reason": f"{ind['sell_count']}/5 algos SELL",
+                        })
                         today_trade_count += 1
+                    else:
+                        await _log_decision(db, {
+                            "symbol": symbol, "action": "HOLD", "price": price, "qty": 0,
+                            "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
+                            "rsi": ind["indicators"]["rsi"],
+                            "reason": f"{ind['buy_count']}B/{ind['sell_count']}S — no consensus" + (" (already holding)" if has_pos else ""),
+                        })
                 except Exception as e:
                     logger.exception(f"Bot scan error for {symbol}")
                     _state["stats"]["errors"] += 1
@@ -202,10 +239,20 @@ async def _check_exits(db, server_module):
                 logger.info(f"[BOT EXIT] Stop-loss hit on {symbol}: {pnl_pct:.2f}%")
                 await _execute_trade(db, server_module, symbol, "SELL", pos["quantity"], cur_price,
                                      {"buy_count": 0, "sell_count": 99})
+                await _log_decision(db, {
+                    "symbol": symbol, "action": "SELL", "price": cur_price, "qty": pos["quantity"],
+                    "buy_count": 0, "sell_count": 0, "rsi": 0,
+                    "reason": f"STOP-LOSS hit ({pnl_pct:.2f}%)",
+                })
             elif pnl_pct >= _config["take_profit_pct"]:
                 logger.info(f"[BOT EXIT] Take-profit hit on {symbol}: {pnl_pct:.2f}%")
                 await _execute_trade(db, server_module, symbol, "SELL", pos["quantity"], cur_price,
                                      {"buy_count": 0, "sell_count": 99})
+                await _log_decision(db, {
+                    "symbol": symbol, "action": "SELL", "price": cur_price, "qty": pos["quantity"],
+                    "buy_count": 0, "sell_count": 0, "rsi": 0,
+                    "reason": f"TAKE-PROFIT hit (+{pnl_pct:.2f}%)",
+                })
         except Exception as e:
             logger.warning(f"Exit check failed for {symbol}: {e}")
 
