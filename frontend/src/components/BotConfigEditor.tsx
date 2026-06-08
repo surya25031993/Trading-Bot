@@ -8,11 +8,21 @@ import { api } from "@/src/api";
 import { X, Plus, Check } from "lucide-react-native";
 
 const POPULAR = [
+  // Indices (track for trend; actual trades only place if it's a stock — for indices use Options tab)
+  "^NSEI", "^BSESN", "^NSEBANK",
+  // Top 20 NSE equity stocks
   "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
   "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LT.NS", "HINDUNILVR.NS",
   "KOTAKBANK.NS", "ASIANPAINT.NS", "AXISBANK.NS", "MARUTI.NS", "M&M.NS",
   "WIPRO.NS", "BAJFINANCE.NS", "ADANIENT.NS", "TATASTEEL.NS", "SUNPHARMA.NS",
 ];
+
+// Display labels for indices
+const SYMBOL_LABEL: Record<string, string> = {
+  "^NSEI": "NIFTY 50",
+  "^BSESN": "SENSEX",
+  "^NSEBANK": "BANK NIFTY",
+};
 
 export function BotConfigEditor({
   visible, initial, onClose, onSaved,
@@ -104,22 +114,28 @@ export function BotConfigEditor({
           <Text style={styles.section}>SCAN INTERVAL</Text>
           <Field label="Seconds between scans (min 30)" value={interval} onChange={setIntervalSec} testID="interval" suffix="s" />
 
-          <Text style={styles.section}>WATCHED STOCKS ({symbols.length})</Text>
-          {symbols.length === 0 && <Text style={styles.warn}>Pick at least 1 stock</Text>}
+          <Text style={styles.section}>WATCHED STOCKS / INDICES ({symbols.length})</Text>
+          {symbols.length === 0 && <Text style={styles.warn}>Pick at least 1 stock or index</Text>}
+          <Text style={styles.hintText}>Indices (orange) — signals only, used for options trading via Options tab. Equity stocks — bot can place actual trades.</Text>
           <View style={styles.symbolGrid}>
             {POPULAR.map((s) => {
               const active = symbols.includes(s);
-              const short = s.replace(".NS", "");
+              const isIndex = s.startsWith("^");
+              const label = SYMBOL_LABEL[s] || s.replace(".NS", "").replace(".BO", "");
               return (
                 <TouchableOpacity
                   key={s}
-                  testID={`sym-${short}`}
+                  testID={`sym-${label.replace(/\s+/g, "")}`}
                   onPress={() => toggleSymbol(s)}
-                  style={[styles.symChip, active && styles.symChipActive]}
+                  style={[
+                    styles.symChip,
+                    active && styles.symChipActive,
+                    isIndex && { borderColor: active ? colors.accent : colors.warning + "88" },
+                  ]}
                   activeOpacity={0.7}
                 >
                   {active && <Check color={colors.accent} size={12} />}
-                  <Text style={[styles.symText, active && styles.symTextActive]}>{short}</Text>
+                  <Text style={[styles.symText, active && styles.symTextActive, isIndex && !active && { color: colors.warning }]}>{label}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -169,6 +185,7 @@ const styles = StyleSheet.create({
   fieldInput: { flex: 1, color: colors.textPrimary, fontFamily: fonts.monoBold, fontSize: 16, paddingVertical: 12 },
   fieldFix: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 14, paddingHorizontal: 6 },
   warn: { fontFamily: fonts.body, color: colors.warning, fontSize: 12, paddingHorizontal: 16, marginBottom: 6 },
+  hintText: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, paddingHorizontal: 16, paddingBottom: 10, lineHeight: 14 },
   symbolGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12, gap: 8 },
   symChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   symChipActive: { borderColor: colors.accent, backgroundColor: colors.accent + "22" },

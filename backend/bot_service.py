@@ -122,6 +122,15 @@ async def _bot_loop(db, server_module):
                     has_pos = symbol in positions
 
                     if ind["buy_count"] >= _config["min_buy_signals"] and not has_pos:
+                        if symbol.startswith("^"):
+                            # Index — can't buy directly, only signal/log
+                            await _log_decision(db, {
+                                "symbol": symbol, "action": "BUY", "price": price, "qty": 0,
+                                "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
+                                "rsi": ind["indicators"]["rsi"],
+                                "reason": f"{ind['buy_count']}/5 BUY — INDEX (use Options tab to trade)",
+                            })
+                            continue
                         qty = _calc_qty(price)
                         if qty > 0:
                             await _execute_trade(db, server_module, symbol, "BUY", qty, price, ind)
