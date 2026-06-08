@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Home, Star, TrendingUp, Briefcase, Layers, ClipboardList } from "lucide-react-native";
+import { Home, Star, TrendingUp, Briefcase, Layers, Bot } from "lucide-react-native";
 import { colors, fonts } from "@/src/theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Platform } from "react-native";
@@ -66,9 +66,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="history"
         options={{
-          title: "History",
-          tabBarIcon: ({ color, size }) => <ClipboardList color={color} size={size} />,
-          tabBarTestID: "tab-history",
+          title: "Bot",
+          tabBarIcon: ({ color, size }) => <Bot color={color} size={size} />,
+          tabBarTestID: "tab-bot",
         }}
       />
     </Tabs>

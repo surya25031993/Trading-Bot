@@ -82,6 +82,13 @@ export const api = {
   optionsStrategies: () => req<any[]>("/options/strategies"),
   optionsCalculate: (body: OptionCalcRequest) => req<OptionCalcResult>("/options/calculate", { method: "POST", body: JSON.stringify(body) }),
   optionsChain: (index: string) => req<any>(`/options/chain?index=${index}`),
+
+  // ============ Bot ============
+  botStatus: () => req<any>("/bot/status"),
+  botStart: (mode: "paper" | "live") => req("/bot/start?mode=" + mode, { method: "POST" }),
+  botStop: () => req("/bot/stop", { method: "POST" }),
+  botConfig: () => req<any>("/bot/config"),
+  botSetConfig: (updates: any) => req("/bot/config", { method: "POST", body: JSON.stringify(updates) }),
 };
 
 export type OptionLeg = { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium: number; qty: number };

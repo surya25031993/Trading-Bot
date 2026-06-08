@@ -1,67 +1,191 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { api, Trade } from "@/src/api";
+import { api } from "@/src/api";
 import { colors, fonts } from "@/src/theme";
+import { Bot, Play, Square, Zap, AlertTriangle } from "lucide-react-native";
 
-export default function History() {
-  const [trades, setTrades] = useState<Trade[]>([]);
+export default function BotScreen() {
+  const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await api.trades();
-      setTrades(data);
+      const s = await api.botStatus();
+      setStatus(s);
     } catch (e) {
       console.warn(e);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 10000); // poll every 10s
+    return () => clearInterval(interval);
+  }, [load]);
+
+  const start = (mode: "paper" | "live") => {
+    if (mode === "live") {
+      Alert.alert(
+        "⚠ Live Mode",
+        "Bot will place REAL orders on your Fyers account using real money. Make sure Fyers is connected first. Continue?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Start Live Bot",
+            style: "destructive",
+            onPress: async () => {
+              setBusy(true);
+              try { await api.botStart("live"); await load(); }
+              catch (e: any) { Alert.alert("Cannot start", e.message); }
+              finally { setBusy(false); }
+            },
+          },
+        ]
+      );
+      return;
+    }
+    (async () => {
+      setBusy(true);
+      try { await api.botStart("paper"); await load(); }
+      catch (e: any) { Alert.alert("Error", e.message); }
+      finally { setBusy(false); }
+    })();
+  };
+
+  const stop = async () => {
+    setBusy(true);
+    try { await api.botStop(); await load(); }
+    catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setBusy(false); }
+  };
+
+  if (loading || !status) {
+    return (
+      <SafeAreaView style={styles.container} edges={["top"]}>
+        <ActivityIndicator color={colors.accent} style={{ marginTop: 80 }} />
+      </SafeAreaView>
+    );
+  }
+
+  const running = status.running;
+  const stats = status.stats || {};
+  const cfg = status.config || {};
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Trade History</Text>
-        <Text style={styles.subtitle}>{trades.length} {trades.length === 1 ? "trade" : "trades"}</Text>
+        <Text style={styles.title}>Auto-Trade Bot</Text>
+        <Text style={styles.subtitle}>Automated paper / live trading on signals</Text>
       </View>
-      <ScrollView
-        contentContainerStyle={{ paddingBottom: 120 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.accent} />}
-      >
-        {loading && <ActivityIndicator color={colors.accent} style={{ marginTop: 60 }} />}
-        {!loading && trades.length === 0 && (
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>No trades yet</Text>
-            <Text style={styles.emptyHint}>Place your first paper trade from the Market or Signals tab</Text>
+
+      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+        {/* Big status card */}
+        <View style={[styles.statusCard, { borderColor: running ? colors.profit : colors.border }]} testID="bot-status">
+          <View style={styles.row}>
+            <View style={[styles.iconBubble, { backgroundColor: (running ? colors.profit : colors.textMuted) + "22" }]}>
+              <Bot color={running ? colors.profit : colors.textMuted} size={26} />
+            </View>
+            <View style={{ flex: 1, marginLeft: 14 }}>
+              <Text style={styles.statusTitle}>{running ? "Bot Running" : "Bot Stopped"}</Text>
+              <Text style={[styles.statusMode, { color: running ? colors.profit : colors.textMuted }]}>
+                {running ? `${status.mode.toUpperCase()} mode • scanning every ${cfg.interval_seconds}s` : "Tap Start to begin"}
+              </Text>
+            </View>
           </View>
-        )}
-        <View style={styles.list}>
-          {trades.map((t) => {
-            const buy = t.side === "BUY";
-            const dt = new Date(t.timestamp);
-            const cleanSym = t.symbol.replace(".NS", "");
-            return (
-              <View key={t.id} style={styles.row} testID={`trade-${t.id}`}>
-                <View style={[styles.sideTag, { backgroundColor: (buy ? colors.profit : colors.loss) + "22", borderColor: buy ? colors.profit : colors.loss }]}>
-                  <Text style={[styles.sideText, { color: buy ? colors.profit : colors.loss }]}>{t.side}</Text>
-                </View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.sym}>{cleanSym}</Text>
-                  <Text style={styles.meta}>{t.quantity} × ₹{t.price.toFixed(2)}</Text>
-                  <Text style={styles.dt}>{dt.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</Text>
-                </View>
-                <Text style={styles.total}>₹{t.total.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</Text>
-              </View>
-            );
-          })}
+
+          {running ? (
+            <TouchableOpacity testID="stop-bot" onPress={stop} disabled={busy} style={[styles.bigBtn, { backgroundColor: colors.loss }]} activeOpacity={0.8}>
+              <Square color="#fff" size={18} />
+              <Text style={styles.bigBtnText}>Stop Bot</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ gap: 10, marginTop: 18 }}>
+              <TouchableOpacity testID="start-paper" onPress={() => start("paper")} disabled={busy} style={[styles.bigBtn, { backgroundColor: colors.accent }]} activeOpacity={0.8}>
+                <Play color="#fff" size={18} />
+                <Text style={styles.bigBtnText}>Start in Paper Mode</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="start-live" onPress={() => start("live")} disabled={busy} style={[styles.bigBtn, { backgroundColor: colors.loss + "22", borderWidth: 1, borderColor: colors.loss }]} activeOpacity={0.8}>
+                <Zap color={colors.loss} size={18} />
+                <Text style={[styles.bigBtnText, { color: colors.loss }]}>Start in Live Mode (real orders)</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Stats */}
+        <View style={styles.statsCard}>
+          <Text style={styles.cardTitle}>Today's Activity</Text>
+          <View style={styles.statsGrid}>
+            <Stat label="Scans" value={stats.scans} />
+            <Stat label="Buys" value={stats.buy_orders} color={colors.profit} />
+            <Stat label="Sells" value={stats.sell_orders} color={colors.loss} />
+            <Stat label="Errors" value={stats.errors} color={stats.errors ? colors.warning : colors.textMuted} />
+          </View>
+          {status.last_tick && (
+            <Text style={styles.lastTick}>
+              Last scan: {new Date(status.last_tick).toLocaleTimeString("en-IN")}
+            </Text>
+          )}
+          {stats.last_error && (
+            <View style={styles.errorBox}>
+              <AlertTriangle color={colors.warning} size={14} />
+              <Text style={styles.errorText}>{stats.last_error}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Config */}
+        <View style={styles.statsCard}>
+          <Text style={styles.cardTitle}>Strategy Config</Text>
+          <View style={styles.cfgList}>
+            <Cfg label="Watched stocks" value={`${cfg.symbols?.length || 0}: ${(cfg.symbols || []).map((s: string) => s.replace(".NS", "")).join(", ")}`} />
+            <Cfg label="Scan interval" value={`${cfg.interval_seconds}s (${Math.round(cfg.interval_seconds/60)} min)`} />
+            <Cfg label="Buy when" value={`≥ ${cfg.min_buy_signals} of 5 algos say BUY`} />
+            <Cfg label="Sell when" value={`≥ ${cfg.min_sell_signals} of 5 algos say SELL`} />
+            <Cfg label="Max ₹ per trade" value={`₹${Number(cfg.max_position_size).toLocaleString("en-IN")}`} />
+            <Cfg label="Max trades/day" value={cfg.max_trades_per_day} />
+            <Cfg label="Auto stop-loss" value={`-${cfg.stop_loss_pct}%`} />
+            <Cfg label="Auto take-profit" value={`+${cfg.take_profit_pct}%`} />
+          </View>
+        </View>
+
+        {/* Info */}
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>How it works</Text>
+          <Text style={styles.infoText}>
+            1. Every {Math.round((cfg.interval_seconds || 300)/60)} min, bot scans your watched stocks{"\n"}
+            2. If ≥3 of 5 algorithms (SMA, EMA, RSI, MACD, Bollinger) say BUY → opens position{"\n"}
+            3. If ≥3 say SELL → closes existing position{"\n"}
+            4. Auto stop-loss at -{cfg.stop_loss_pct}%, take-profit at +{cfg.take_profit_pct}%{"\n"}
+            5. Max {cfg.max_trades_per_day} trades per day, ₹{Number(cfg.max_position_size||0).toLocaleString("en-IN")} per position{"\n"}{"\n"}
+            <Text style={{ color: colors.warning }}>⚠ Paper Mode</Text>: trades hit your virtual ₹10L portfolio only. No real money.{"\n"}
+            <Text style={{ color: colors.loss }}>⚠ Live Mode</Text>: places REAL Fyers orders. Requires Fyers connection from Settings.
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: any; color?: string }) {
+  return (
+    <View style={styles.statCell}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statValue, color && { color }]}>{value ?? 0}</Text>
+    </View>
+  );
+}
+
+function Cfg({ label, value }: { label: string; value: any }) {
+  return (
+    <View style={styles.cfgRow}>
+      <Text style={styles.cfgKey}>{label}</Text>
+      <Text style={styles.cfgVal}>{value}</Text>
+    </View>
   );
 }
 
@@ -70,15 +194,27 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
   title: { fontFamily: fonts.heading, color: colors.textPrimary, fontSize: 26 },
   subtitle: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 12, marginTop: 4 },
-  list: { marginHorizontal: 12, backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
-  row: { flexDirection: "row", alignItems: "center", padding: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  sideTag: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, minWidth: 54, alignItems: "center" },
-  sideText: { fontFamily: fonts.bodySemi, fontSize: 11 },
-  sym: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 14 },
-  meta: { fontFamily: fonts.mono, color: colors.textSecondary, fontSize: 11, marginTop: 2 },
-  dt: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, marginTop: 2 },
-  total: { fontFamily: fonts.monoBold, color: colors.textPrimary, fontSize: 14 },
-  empty: { alignItems: "center", marginTop: 80, paddingHorizontal: 24 },
-  emptyText: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 16 },
-  emptyHint: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: "center" },
+  statusCard: { marginHorizontal: 12, backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, padding: 18 },
+  row: { flexDirection: "row", alignItems: "center" },
+  iconBubble: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },
+  statusTitle: { fontFamily: fonts.heading, color: colors.textPrimary, fontSize: 18 },
+  statusMode: { fontFamily: fonts.bodyMed, fontSize: 12, marginTop: 4 },
+  bigBtn: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 12, marginTop: 18 },
+  bigBtnText: { fontFamily: fonts.bodySemi, color: "#fff", fontSize: 14 },
+  statsCard: { marginHorizontal: 12, marginTop: 12, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14 },
+  cardTitle: { fontFamily: fonts.headingSemi, color: colors.textPrimary, fontSize: 14, marginBottom: 10 },
+  statsGrid: { flexDirection: "row", gap: 8 },
+  statCell: { flex: 1, backgroundColor: colors.bg, borderRadius: 8, padding: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  statLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, letterSpacing: 1 },
+  statValue: { fontFamily: fonts.monoBold, color: colors.textPrimary, fontSize: 18, marginTop: 4 },
+  lastTick: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 11, marginTop: 12, textAlign: "center" },
+  errorBox: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: colors.warning + "11", padding: 10, borderRadius: 8, marginTop: 10, borderWidth: 1, borderColor: colors.warning + "44" },
+  errorText: { fontFamily: fonts.body, color: colors.warning, fontSize: 11, flex: 1 },
+  cfgList: { gap: 4 },
+  cfgRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, gap: 8 },
+  cfgKey: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 11 },
+  cfgVal: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 12, maxWidth: "60%", textAlign: "right" },
+  infoCard: { marginHorizontal: 12, marginTop: 12, backgroundColor: colors.accent + "11", borderRadius: 14, borderWidth: 1, borderColor: colors.accent + "44", padding: 14 },
+  infoTitle: { fontFamily: fonts.headingSemi, color: colors.accent, fontSize: 13, marginBottom: 8 },
+  infoText: { fontFamily: fonts.body, color: colors.textSecondary, fontSize: 12, lineHeight: 19 },
 });

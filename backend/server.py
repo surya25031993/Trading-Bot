@@ -24,6 +24,7 @@ from options import (
     bs_price, bs_greeks, CalcRequest,
 )
 import fyers_integration as fyers_int
+import bot_service
 from fastapi.responses import HTMLResponse
 
 ROOT_DIR = Path(__file__).parent
@@ -735,6 +736,40 @@ async def fyers_place_order(order: fyers_int.FyersOrderRequest, live_mode: bool 
         raise HTTPException(status_code=401, detail="Fyers not connected.")
     result = await asyncio.to_thread(fyers_int.place_order_sync, client, order)
     return result
+
+
+import sys
+
+
+# ============ AUTO-TRADING BOT ============
+@api_router.get("/bot/status")
+async def bot_status():
+    return bot_service.get_status()
+
+
+@api_router.post("/bot/start")
+async def bot_start(mode: str = "paper"):
+    if mode == "live":
+        client = await fyers_int.get_client(db)
+        if not client:
+            raise HTTPException(status_code=400, detail="Live mode requires Fyers connection. Connect Fyers first.")
+    server_module = sys.modules[__name__]
+    return await bot_service.start(db, server_module, mode=mode)
+
+
+@api_router.post("/bot/stop")
+async def bot_stop():
+    return await bot_service.stop()
+
+
+@api_router.get("/bot/config")
+async def bot_get_config():
+    return bot_service.get_config()
+
+
+@api_router.post("/bot/config")
+async def bot_set_config(updates: dict):
+    return bot_service.set_config(updates)
 
 
 # Include router
