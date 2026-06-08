@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api, OptionCalcResult, OptionSuggestion, OptionLeg } from "@/src/api";
 import { colors, fonts } from "@/src/theme";
 import { PayoffChart } from "@/src/components/PayoffChart";
+import { AdvancedChart, ChartData } from "@/src/components/AdvancedChart";
 import { Sparkles, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
 
 function fyersUnavailableMsg(chain: any): string {
@@ -23,6 +24,7 @@ export default function Options() {
   const [refreshing, setRefreshing] = useState(false);
   const [calcLoading, setCalcLoading] = useState(false);
   const [chain, setChain] = useState<any>(null);
+  const [indexChart, setIndexChart] = useState<ChartData | null>(null);
   const [tradeBusy, setTradeBusy] = useState(false);
   const [tradeMsg, setTradeMsg] = useState<string | null>(null);
 
@@ -45,6 +47,18 @@ export default function Options() {
         setChain(ch.available ? ch : null);
       } catch {
         setChain(null);
+      }
+      // Load index advanced chart
+      try {
+        const idxSymMap: Record<string, string> = { NIFTY: "^NSEI", SENSEX: "^BSESN", BANKNIFTY: "^NSEBANK" };
+        const sym = idxSymMap[idx];
+        if (sym) {
+          const ch = await api.stockChart(sym);
+          setIndexChart(ch);
+        }
+      } catch (e) {
+        console.warn("index chart load", e);
+        setIndexChart(null);
       }
     } catch (e) {
       console.warn("options load", e);
@@ -139,6 +153,14 @@ export default function Options() {
                 </View>
               </View>
             </View>
+
+            {/* Index Technical Chart */}
+            {indexChart && (
+              <View style={styles.card} testID="index-chart">
+                <Text style={styles.cardTitle}>{sugg.index} Technical Chart · All Indicators</Text>
+                <AdvancedChart data={indexChart} />
+              </View>
+            )}
 
             {/* Strategy recommendation */}
             <View style={styles.card} testID="strategy-card">
