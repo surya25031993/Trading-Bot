@@ -950,6 +950,28 @@ async def bot_stats():
     }
 
 
+@api_router.post("/options/paper-trade")
+async def options_paper_trade(body: dict):
+    """Place paper trades for all legs of an option strategy."""
+    index = body.get("index", "NIFTY")
+    legs = body.get("legs", [])
+    lot = LOT_SIZE.get(index, 75)
+    placed = []
+    for leg in legs:
+        try:
+            # Create a synthetic option symbol like "NIFTY 23400 CE BUY"
+            sym = f"{index} {leg['strike']} {leg['type']}"
+            qty = int(leg.get("qty", 1)) * lot  # convert lots to units
+            price = float(leg.get("premium", leg.get("premium_est", 0)))
+            side = leg["side"]
+            req = PaperTradeRequest(symbol=sym, name=sym, side=side, quantity=qty, price=price)
+            result = await place_paper_trade(req)
+            placed.append({"leg": sym, "side": side, "qty": qty, "price": price, "ok": True})
+        except Exception as e:
+            placed.append({"leg": str(leg), "ok": False, "error": str(e)[:100]})
+    return {"ok": all(p.get("ok") for p in placed), "placed": placed}
+
+
 # Include router
 app.include_router(api_router)
 

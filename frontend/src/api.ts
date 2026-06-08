@@ -82,6 +82,7 @@ export const api = {
   optionsStrategies: () => req<any[]>("/options/strategies"),
   optionsCalculate: (body: OptionCalcRequest) => req<OptionCalcResult>("/options/calculate", { method: "POST", body: JSON.stringify(body) }),
   optionsChain: (index: string) => req<any>(`/options/chain?index=${index}`),
+  optionsPaperTrade: (body: { index: string; legs: any[] }) => req<any>("/options/paper-trade", { method: "POST", body: JSON.stringify(body) }),
 
   // ============ Bot ============
   botStatus: () => req<any>("/bot/status"),

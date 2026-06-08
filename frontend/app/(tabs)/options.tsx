@@ -6,6 +6,12 @@ import { colors, fonts } from "@/src/theme";
 import { PayoffChart } from "@/src/components/PayoffChart";
 import { Sparkles, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
 
+function fyersUnavailableMsg(chain: any): string {
+  if (!chain) return "Connect Fyers in Settings → Live option chain will appear here during market hours (9:15 AM – 3:30 PM IST).";
+  if (chain.available === false) return chain.reason || "Option chain unavailable. Fyers connection may be needed.";
+  return "Loading…";
+}
+
 type Index = "NIFTY" | "SENSEX" | "BANKNIFTY";
 const INDICES: Index[] = ["NIFTY", "SENSEX", "BANKNIFTY"];
 
@@ -16,13 +22,15 @@ export default function Options() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [calcLoading, setCalcLoading] = useState(false);
+  const [chain, setChain] = useState<any>(null);
+  const [tradeBusy, setTradeBusy] = useState(false);
+  const [tradeMsg, setTradeMsg] = useState<string | null>(null);
 
   const load = useCallback(async (idx: Index) => {
     setLoading(true);
     try {
       const s = await api.optionsSuggest(idx);
       setSugg(s);
-      // immediately calc payoff for the suggested strategy
       const legs: OptionLeg[] = s.concrete_legs.map((l) => ({
         side: l.side, type: l.type, strike: l.strike, premium: l.premium_est, qty: l.qty,
       }));
@@ -31,6 +39,13 @@ export default function Options() {
         index: idx as any, spot: s.spot, days_to_expiry: 7, iv: 15, legs,
       });
       setCalc(c);
+      // try fyers option chain first, fallback to NSE
+      try {
+        const ch = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/fyers/option-chain?index=${idx}&strike_count=8`).then(r => r.json());
+        setChain(ch.available ? ch : null);
+      } catch {
+        setChain(null);
+      }
     } catch (e) {
       console.warn("options load", e);
     } finally {
@@ -39,6 +54,26 @@ export default function Options() {
       setCalcLoading(false);
     }
   }, []);
+
+  const placeStrategy = async () => {
+    if (!sugg) return;
+    setTradeBusy(true);
+    try {
+      const result = await api.optionsPaperTrade({
+        index: sugg.index,
+        legs: sugg.concrete_legs.map(l => ({
+          side: l.side, type: l.type, strike: l.strike, premium: l.premium_est, qty: l.qty,
+        })),
+      });
+      setTradeMsg(`✓ Paper trade placed: ${sugg.strategy.name} on ${sugg.index}`);
+      setTimeout(() => setTradeMsg(null), 4000);
+    } catch (e: any) {
+      setTradeMsg(`Error: ${e.message}`);
+      setTimeout(() => setTradeMsg(null), 4000);
+    } finally {
+      setTradeBusy(false);
+    }
+  };
 
   useEffect(() => { load(index); }, [index, load]);
 
@@ -141,6 +176,56 @@ export default function Options() {
               })}
               <Text style={styles.note}>{sugg.note}</Text>
             </View>
+
+            {/* Paper trade button */}
+            <View style={styles.tradeRow}>
+              <TouchableOpacity
+                testID="paper-trade-strategy"
+                onPress={placeStrategy}
+                disabled={tradeBusy}
+                style={[styles.tradeBtn, { backgroundColor: sugg.consensus === "BUY" ? colors.profit : sugg.consensus === "SELL" ? colors.loss : colors.accent }]}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.tradeBtnText}>
+                  {tradeBusy ? "Placing…" : `Paper Trade ${sugg.strategy.name}`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {tradeMsg && <Text style={[styles.toast, { color: tradeMsg.startsWith("✓") ? colors.profit : colors.loss }]} testID="trade-toast">{tradeMsg}</Text>}
+
+            {/* Live Option Chain */}
+            {chain?.available && chain?.chain?.length > 0 ? (
+              <View style={styles.card} testID="option-chain">
+                <Text style={styles.cardTitle}>Live Option Chain · {chain.expiry}</Text>
+                <View style={styles.chainHeader}>
+                  <Text style={styles.chainCol}>CALL LTP</Text>
+                  <Text style={styles.chainCol}>OI</Text>
+                  <Text style={[styles.chainCol, styles.strikeCol]}>STRIKE</Text>
+                  <Text style={styles.chainCol}>OI</Text>
+                  <Text style={styles.chainCol}>PUT LTP</Text>
+                </View>
+                {chain.chain.map((row: any, i: number) => {
+                  const isATM = row.strike === chain.atm;
+                  return (
+                    <View key={i} style={[styles.chainRow, isATM && styles.chainRowATM]} testID={`chain-${row.strike}`}>
+                      <Text style={[styles.chainCol, { color: colors.profit }]}>{row.ce_ltp?.toFixed(1) || "-"}</Text>
+                      <Text style={[styles.chainCol, styles.chainOI]}>{((row.ce_oi || 0) / 1000).toFixed(0)}k</Text>
+                      <Text style={[styles.chainCol, styles.strikeCol, isATM && { color: colors.accent, fontFamily: fonts.monoBold }]}>{row.strike}</Text>
+                      <Text style={[styles.chainCol, styles.chainOI]}>{((row.pe_oi || 0) / 1000).toFixed(0)}k</Text>
+                      <Text style={[styles.chainCol, { color: colors.loss }]}>{row.pe_ltp?.toFixed(1) || "-"}</Text>
+                    </View>
+                  );
+                })}
+                <Text style={styles.chainHint}>Source: Fyers Live · ATM ₹{chain.atm} highlighted</Text>
+              </View>
+            ) : (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Live Option Chain</Text>
+                <Text style={styles.chainEmpty}>
+                  {fyersUnavailableMsg(chain)}
+                </Text>
+              </View>
+            )}
 
             {/* Payoff Chart */}
             {calc && (
@@ -270,4 +355,16 @@ const styles = StyleSheet.create({
   greekHint: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 9, marginTop: 2 },
 
   disclaimer: { fontFamily: fonts.body, color: colors.warning, fontSize: 11, marginHorizontal: 16, marginTop: 20, lineHeight: 17, textAlign: "center" },
+  tradeRow: { marginHorizontal: 12, marginTop: 14 },
+  tradeBtn: { paddingVertical: 16, borderRadius: 12, alignItems: "center" },
+  tradeBtnText: { fontFamily: fonts.bodySemi, color: "#fff", fontSize: 15, letterSpacing: 1 },
+  toast: { textAlign: "center", fontFamily: fonts.bodySemi, marginTop: 10, fontSize: 12 },
+  chainHeader: { flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border, marginTop: 8 },
+  chainRow: { flexDirection: "row", paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  chainRowATM: { backgroundColor: colors.accent + "11" },
+  chainCol: { flex: 1, fontFamily: fonts.mono, color: colors.textPrimary, fontSize: 11, textAlign: "center" },
+  chainOI: { color: colors.textMuted },
+  strikeCol: { fontFamily: fonts.bodySemi, color: colors.textPrimary, flex: 1.2 },
+  chainHint: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, marginTop: 10, textAlign: "center" },
+  chainEmpty: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: 8 },
 });
