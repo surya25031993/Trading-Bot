@@ -822,6 +822,15 @@ async def fyers_option_chain(index: str = "NIFTY", strike_count: int = 10):
     return await asyncio.to_thread(fyers_int.fetch_option_chain_sync, client, index, strike_count)
 
 
+@api_router.get("/fyers/history")
+async def fyers_history(symbol: str, resolution: str = "5"):
+    """Get intraday/historical candles for any Fyers symbol (eg NSE:NIFTY24JUN23400CE)."""
+    client = await fyers_int.get_client(db)
+    if not client:
+        return {"available": False, "reason": "Fyers not connected"}
+    return await asyncio.to_thread(fyers_int.get_history_sync, client, symbol, resolution)
+
+
 @api_router.post("/fyers/orders")
 async def fyers_place_order(order: fyers_int.FyersOrderRequest, live_mode: bool = False):
     """Place a real order on Fyers. ⚠ live_mode=true required to actually fire — safety check."""

@@ -5,6 +5,7 @@ import { api, OptionCalcResult, OptionSuggestion, OptionLeg } from "@/src/api";
 import { colors, fonts } from "@/src/theme";
 import { PayoffChart } from "@/src/components/PayoffChart";
 import { AdvancedChart, ChartData } from "@/src/components/AdvancedChart";
+import { OptionPremiumChart, OptionCandle } from "@/src/components/OptionPremiumChart";
 import { Sparkles, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
 
 function fyersUnavailableMsg(chain: any): string {
@@ -25,6 +26,9 @@ export default function Options() {
   const [calcLoading, setCalcLoading] = useState(false);
   const [chain, setChain] = useState<any>(null);
   const [indexChart, setIndexChart] = useState<ChartData | null>(null);
+  const [ceCandles, setCeCandles] = useState<OptionCandle[]>([]);
+  const [peCandles, setPeCandles] = useState<OptionCandle[]>([]);
+  const [atmInfo, setAtmInfo] = useState<{ ceSym: string; peSym: string; strike: number } | null>(null);
   const [tradeBusy, setTradeBusy] = useState(false);
   const [tradeMsg, setTradeMsg] = useState<string | null>(null);
 
@@ -44,7 +48,22 @@ export default function Options() {
       // try fyers option chain first, fallback to NSE
       try {
         const ch = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/fyers/option-chain?index=${idx}&strike_count=8`).then(r => r.json());
-        setChain(ch.available ? ch : null);
+        if (ch.available) {
+          setChain(ch);
+          // Get ATM symbols and fetch their intraday premium history
+          const atmRow = ch.chain.find((r: any) => r.strike === ch.atm);
+          if (atmRow && atmRow.ce_symbol && atmRow.pe_symbol) {
+            setAtmInfo({ ceSym: atmRow.ce_symbol, peSym: atmRow.pe_symbol, strike: ch.atm });
+            const [ce, pe] = await Promise.all([
+              fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/fyers/history?symbol=${encodeURIComponent(atmRow.ce_symbol)}&resolution=5`).then(r => r.json()).catch(() => null),
+              fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/fyers/history?symbol=${encodeURIComponent(atmRow.pe_symbol)}&resolution=5`).then(r => r.json()).catch(() => null),
+            ]);
+            setCeCandles(ce?.candles || []);
+            setPeCandles(pe?.candles || []);
+          }
+        } else {
+          setChain(null);
+        }
       } catch {
         setChain(null);
       }
@@ -214,6 +233,20 @@ export default function Options() {
               </TouchableOpacity>
             </View>
             {tradeMsg && <Text style={[styles.toast, { color: tradeMsg.startsWith("✓") ? colors.profit : colors.loss }]} testID="trade-toast">{tradeMsg}</Text>}
+
+            {/* Live Option Premium Charts (CE + PE) */}
+            {atmInfo && (ceCandles.length > 0 || peCandles.length > 0) && (
+              <View style={styles.card} testID="option-premium-charts">
+                <Text style={styles.cardTitle}>ATM {atmInfo.strike} · Live Premium Chart (5m)</Text>
+                <View style={{ marginTop: 8 }}>
+                  <OptionPremiumChart candles={ceCandles} title={`CALL ${atmInfo.strike}`} color={colors.profit} />
+                </View>
+                <View style={{ marginTop: 14 }}>
+                  <OptionPremiumChart candles={peCandles} title={`PUT ${atmInfo.strike}`} color={colors.loss} />
+                </View>
+                <Text style={styles.chainHint}>Source: Fyers · 5-min candles · last 5 days</Text>
+              </View>
+            )}
 
             {/* Live Option Chain */}
             {chain?.available && chain?.chain?.length > 0 ? (

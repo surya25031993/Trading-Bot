@@ -265,6 +265,35 @@ def get_profile_sync(client: fyersModel.FyersModel) -> dict:
     return resp.get("data", {})
 
 
+def get_history_sync(client: fyersModel.FyersModel, symbol: str, resolution: str = "5", range_from: str = "", range_to: str = "") -> dict:
+    """Fetch historical candles for any Fyers symbol (equity or option)."""
+    from datetime import datetime as _dt, timedelta as _td
+    if not range_to:
+        range_to = _dt.now().strftime("%Y-%m-%d")
+    if not range_from:
+        range_from = (_dt.now() - _td(days=5)).strftime("%Y-%m-%d")
+    payload = {
+        "symbol": symbol,
+        "resolution": resolution,
+        "date_format": "1",
+        "range_from": range_from,
+        "range_to": range_to,
+        "cont_flag": "1",
+    }
+    resp = client.history(data=payload)
+    if resp.get("s") != "ok":
+        return {"available": False, "reason": resp.get("message", "Fyers history error")}
+    candles = resp.get("candles", [])
+    # Each candle: [timestamp, open, high, low, close, volume]
+    return {
+        "available": True,
+        "candles": [
+            {"t": int(c[0]), "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]}
+            for c in candles
+        ],
+    }
+
+
 # ============ Order Placement ============
 class FyersOrderRequest(BaseModel):
     symbol: str  # Fyers format e.g. "NSE:RELIANCE-EQ" or "NSE:NIFTY25FEB23400CE"
