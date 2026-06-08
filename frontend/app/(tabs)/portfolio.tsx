@@ -8,6 +8,9 @@ import { RotateCcw } from "lucide-react-native";
 
 export default function PortfolioScreen() {
   const [port, setPort] = useState<Portfolio | null>(null);
+  const [fyersHoldings, setFyersHoldings] = useState<any>(null);
+  const [fyersFunds, setFyersFunds] = useState<any>(null);
+  const [fyersConnected, setFyersConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
@@ -16,6 +19,19 @@ export default function PortfolioScreen() {
     try {
       const data = await api.portfolio();
       setPort(data);
+      // Try to load Fyers data
+      try {
+        const s = await api.fyersStatus();
+        setFyersConnected(s.connected);
+        if (s.connected) {
+          const [h, f] = await Promise.all([
+            api.fyersHoldings().catch(() => null),
+            api.fyersFunds().catch(() => null),
+          ]);
+          setFyersHoldings(h);
+          setFyersFunds(f);
+        }
+      } catch {}
     } catch (e) {
       console.warn("portfolio", e);
     } finally {
@@ -84,8 +100,72 @@ export default function PortfolioScreen() {
           </View>
         </View>
 
-        <Text style={styles.section}>Holdings ({port.positions.length})</Text>
-        {port.positions.length === 0 && (
+        {/* Live Fyers Portfolio */}
+        {fyersConnected && (
+          <View style={styles.fyersCard} testID="fyers-portfolio">
+            <View style={styles.fyersHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.fyersBadge}>LIVE • FYERS</Text>
+                <Text style={styles.fyersTitle}>Your Real Account</Text>
+              </View>
+            </View>
+            {Array.isArray(fyersFunds) && (() => {
+              const avail = fyersFunds.find((f: any) => f.title?.toLowerCase().includes("available") || f.id === 10);
+              const used = fyersFunds.find((f: any) => f.title?.toLowerCase().includes("utilized"));
+              const total = fyersFunds.find((f: any) => f.title?.toLowerCase().includes("total"));
+              return (
+                <View style={styles.fyersFunds}>
+                  <View style={styles.fyersFundCell}>
+                    <Text style={styles.fyersFundLabel}>Available</Text>
+                    <Text style={[styles.fyersFundVal, { color: colors.profit }]}>₹{(avail?.equityAmount || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
+                  </View>
+                  <View style={styles.fyersFundCell}>
+                    <Text style={styles.fyersFundLabel}>Utilized</Text>
+                    <Text style={styles.fyersFundVal}>₹{(used?.equityAmount || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
+                  </View>
+                  <View style={styles.fyersFundCell}>
+                    <Text style={styles.fyersFundLabel}>Total</Text>
+                    <Text style={styles.fyersFundVal}>₹{(total?.equityAmount || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
+                  </View>
+                </View>
+              );
+            })()}
+            {fyersHoldings?.overall && (
+              <View style={styles.fyersOverall}>
+                <Text style={styles.fyersOverallLabel}>Total Investment ₹{(fyersHoldings.overall.total_investment || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
+                <Text style={[styles.fyersPnl, { color: (fyersHoldings.overall.total_pl || 0) >= 0 ? colors.profit : colors.loss }]}>
+                  {(fyersHoldings.overall.total_pl || 0) >= 0 ? "+" : ""}₹{(fyersHoldings.overall.total_pl || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })} ({(fyersHoldings.overall.pnl_perc || 0).toFixed(2)}%)
+                </Text>
+              </View>
+            )}
+            {fyersHoldings?.holdings?.length > 0 ? (
+              <View style={{ marginTop: 10 }}>
+                {fyersHoldings.holdings.slice(0, 10).map((h: any, i: number) => {
+                  const pl = h.pl || 0;
+                  const pos = pl >= 0;
+                  return (
+                    <View key={i} style={styles.fyersHolding} testID={`fyers-hold-${i}`}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.fyersHoldSym}>{(h.symbol || "").replace("NSE:", "").replace("-EQ", "")}</Text>
+                        <Text style={styles.fyersHoldQty}>{h.quantity} @ ₹{(h.costPrice || 0).toFixed(2)}</Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={styles.fyersHoldVal}>₹{((h.marketVal || 0)).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</Text>
+                        <Text style={[styles.fyersHoldPnl, { color: pos ? colors.profit : colors.loss }]}>
+                          {pos ? "+" : ""}₹{pl.toFixed(0)}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.fyersEmpty}>No equity holdings in your Fyers account</Text>
+            )}
+          </View>
+        )}
+
+        <Text style={styles.section}>Paper Holdings ({port.positions.length})</Text>        {port.positions.length === 0 && (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>No holdings yet</Text>
             <Text style={styles.emptyHint}>Buy your first stock from any signal or detail page</Text>
@@ -146,4 +226,21 @@ const styles = StyleSheet.create({
   qty: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 11, marginTop: 2 },
   price: { fontFamily: fonts.monoBold, color: colors.textPrimary, fontSize: 14 },
   pnl: { fontFamily: fonts.mono, fontSize: 11, marginTop: 2 },
+  fyersCard: { marginHorizontal: 12, marginTop: 12, backgroundColor: colors.profit + "11", borderRadius: 14, borderWidth: 1, borderColor: colors.profit + "55", padding: 14 },
+  fyersHeader: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
+  fyersBadge: { fontFamily: fonts.bodySemi, color: colors.profit, fontSize: 9, letterSpacing: 2 },
+  fyersTitle: { fontFamily: fonts.headingSemi, color: colors.textPrimary, fontSize: 15, marginTop: 2 },
+  fyersFunds: { flexDirection: "row", gap: 8, marginTop: 4 },
+  fyersFundCell: { flex: 1, backgroundColor: colors.bg, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  fyersFundLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, letterSpacing: 1 },
+  fyersFundVal: { fontFamily: fonts.monoBold, color: colors.textPrimary, fontSize: 12, marginTop: 4 },
+  fyersOverall: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  fyersOverallLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 11 },
+  fyersPnl: { fontFamily: fonts.monoBold, fontSize: 13 },
+  fyersHolding: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  fyersHoldSym: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 12 },
+  fyersHoldQty: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 10, marginTop: 2 },
+  fyersHoldVal: { fontFamily: fonts.monoBold, color: colors.textPrimary, fontSize: 12 },
+  fyersHoldPnl: { fontFamily: fonts.mono, fontSize: 11, marginTop: 2 },
+  fyersEmpty: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 11, textAlign: "center", marginTop: 12, fontStyle: "italic" },
 });

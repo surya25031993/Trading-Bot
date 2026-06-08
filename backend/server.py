@@ -191,6 +191,69 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     bb_upper = bb_mid + 2 * bb_std
     bb_lower = bb_mid - 2 * bb_std
 
+    # === QUANT INDICATORS ===
+    high = df["High"]
+    low = df["Low"]
+
+    # ATR (14) — Average True Range
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(14).mean()
+
+    # Supertrend (10, 3) — VERY popular Indian quant indicator
+    hl2 = (high + low) / 2
+    multiplier = 3.0
+    upper_band = hl2 + multiplier * atr
+    lower_band = hl2 - multiplier * atr
+    supertrend = pd.Series(index=df.index, dtype=float)
+    in_uptrend = pd.Series(index=df.index, dtype=bool)
+    for i in range(len(df)):
+        if i == 0:
+            supertrend.iloc[i] = upper_band.iloc[i]
+            in_uptrend.iloc[i] = True
+            continue
+        prev_close = float(close.iloc[i-1])
+        prev_st = float(supertrend.iloc[i-1])
+        if prev_close > prev_st:
+            supertrend.iloc[i] = max(float(lower_band.iloc[i]), prev_st)
+            in_uptrend.iloc[i] = True
+        else:
+            supertrend.iloc[i] = min(float(upper_band.iloc[i]), prev_st)
+            in_uptrend.iloc[i] = False
+        if float(close.iloc[i]) > supertrend.iloc[i] and not in_uptrend.iloc[i]:
+            in_uptrend.iloc[i] = True
+            supertrend.iloc[i] = float(lower_band.iloc[i])
+        elif float(close.iloc[i]) < supertrend.iloc[i] and in_uptrend.iloc[i]:
+            in_uptrend.iloc[i] = False
+            supertrend.iloc[i] = float(upper_band.iloc[i])
+    latest_st = float(supertrend.iloc[-1])
+    st_uptrend = bool(in_uptrend.iloc[-1])
+
+    # ADX (14) — Average Directional Index, trend strength
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=df.index)
+    atr14 = tr.rolling(14).mean().replace(0, np.nan)
+    plus_di = 100 * (plus_dm.rolling(14).mean() / atr14)
+    minus_di = 100 * (minus_dm.rolling(14).mean() / atr14)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx = dx.rolling(14).mean()
+    latest_adx = float(adx.iloc[-1]) if not np.isnan(adx.iloc[-1]) else 20.0
+    latest_plus_di = float(plus_di.iloc[-1]) if not np.isnan(plus_di.iloc[-1]) else 0.0
+    latest_minus_di = float(minus_di.iloc[-1]) if not np.isnan(minus_di.iloc[-1]) else 0.0
+
+    # Stochastic Oscillator (14, 3, 3) — momentum
+    period = 14
+    lowest_low = low.rolling(period).min()
+    highest_high = high.rolling(period).max()
+    pk = 100 * (close - lowest_low) / (highest_high - lowest_low).replace(0, np.nan)
+    pd_line = pk.rolling(3).mean()
+    latest_stoch_k = float(pk.iloc[-1]) if not np.isnan(pk.iloc[-1]) else 50.0
+    latest_stoch_d = float(pd_line.iloc[-1]) if not np.isnan(pd_line.iloc[-1]) else 50.0
+
     latest_close = float(close.iloc[-1])
     latest_rsi = float(rsi.iloc[-1]) if not np.isnan(rsi.iloc[-1]) else 50.0
     latest_macd = float(macd.iloc[-1])
@@ -248,12 +311,40 @@ def compute_indicators(df: pd.DataFrame) -> dict:
     else:
         signals.append({"name": "Bollinger Bands", "action": "HOLD", "reason": "Price within bands"})
 
+    # Supertrend (QUANT) — primary trend follower in Indian markets
+    prev_uptrend = bool(in_uptrend.iloc[-2])
+    if st_uptrend and not prev_uptrend:
+        signals.append({"name": "Supertrend (10,3)", "action": "BUY", "reason": f"Trend flipped UP at ₹{latest_st:.0f}"})
+    elif not st_uptrend and prev_uptrend:
+        signals.append({"name": "Supertrend (10,3)", "action": "SELL", "reason": f"Trend flipped DOWN at ₹{latest_st:.0f}"})
+    elif st_uptrend:
+        signals.append({"name": "Supertrend (10,3)", "action": "BUY", "reason": "Uptrend continues"})
+    else:
+        signals.append({"name": "Supertrend (10,3)", "action": "SELL", "reason": "Downtrend continues"})
+
+    # ADX (QUANT) — trend strength + direction
+    if latest_adx > 25:  # strong trend
+        if latest_plus_di > latest_minus_di:
+            signals.append({"name": "ADX (14)", "action": "BUY", "reason": f"Strong uptrend (ADX {latest_adx:.0f})"})
+        else:
+            signals.append({"name": "ADX (14)", "action": "SELL", "reason": f"Strong downtrend (ADX {latest_adx:.0f})"})
+    else:
+        signals.append({"name": "ADX (14)", "action": "HOLD", "reason": f"Weak trend (ADX {latest_adx:.0f})"})
+
+    # Stochastic (QUANT) — overbought/oversold momentum
+    if latest_stoch_k < 20 and latest_stoch_k > latest_stoch_d:
+        signals.append({"name": "Stochastic", "action": "BUY", "reason": f"Oversold cross-up at {latest_stoch_k:.0f}"})
+    elif latest_stoch_k > 80 and latest_stoch_k < latest_stoch_d:
+        signals.append({"name": "Stochastic", "action": "SELL", "reason": f"Overbought cross-down at {latest_stoch_k:.0f}"})
+    else:
+        signals.append({"name": "Stochastic", "action": "HOLD", "reason": f"Neutral at {latest_stoch_k:.0f}"})
+
     # Overall consensus
     buys = sum(1 for s in signals if s["action"] == "BUY")
     sells = sum(1 for s in signals if s["action"] == "SELL")
-    if buys > sells and buys >= 2:
+    if buys > sells and buys >= 3:
         consensus = "BUY"
-    elif sells > buys and sells >= 2:
+    elif sells > buys and sells >= 3:
         consensus = "SELL"
     else:
         consensus = "HOLD"
@@ -269,6 +360,11 @@ def compute_indicators(df: pd.DataFrame) -> dict:
             "bb_upper": round(latest_bb_u, 2),
             "bb_lower": round(latest_bb_l, 2),
             "price": round(latest_close, 2),
+            "supertrend": round(latest_st, 2),
+            "supertrend_uptrend": st_uptrend,
+            "adx": round(latest_adx, 2),
+            "stoch_k": round(latest_stoch_k, 2),
+            "stoch_d": round(latest_stoch_d, 2),
         },
         "signals": signals,
         "consensus": consensus,
