@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "@/src/api";
 import { colors, fonts } from "@/src/theme";
@@ -15,6 +15,7 @@ export default function BotScreen() {
   const [busy, setBusy] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmLive, setConfirmLive] = useState(false);
   const lastTradeIdRef = React.useRef<string | null>(null);
 
   const load = useCallback(async () => {
@@ -56,23 +57,7 @@ export default function BotScreen() {
 
   const start = (mode: "paper" | "live") => {
     if (mode === "live") {
-      Alert.alert(
-        "⚠ Live Mode",
-        "Bot will place REAL orders on your Fyers account using real money. Make sure Fyers is connected first. Continue?",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Start Live Bot",
-            style: "destructive",
-            onPress: async () => {
-              setBusy(true);
-              try { await api.botStart("live"); await load(); }
-              catch (e: any) { Alert.alert("Cannot start", e.message); }
-              finally { setBusy(false); }
-            },
-          },
-        ]
-      );
+      setConfirmLive(true);
       return;
     }
     (async () => {
@@ -81,6 +66,19 @@ export default function BotScreen() {
       catch (e: any) { Alert.alert("Error", e.message); }
       finally { setBusy(false); }
     })();
+  };
+
+  const confirmStartLive = async () => {
+    setBusy(true);
+    setConfirmLive(false);
+    try {
+      await api.botStart("live");
+      await load();
+    } catch (e: any) {
+      Alert.alert("Cannot start live mode", e.message || "Unknown error");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const stop = async () => {
@@ -314,6 +312,31 @@ export default function BotScreen() {
         onClose={() => setEditorOpen(false)}
         onSaved={load}
       />
+
+      {/* Live mode confirmation modal — works cross-platform unlike Alert.alert */}
+      <Modal visible={confirmLive} transparent animationType="fade" onRequestClose={() => setConfirmLive(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard} testID="live-confirm-modal">
+            <View style={[styles.iconBubble, { backgroundColor: colors.loss + "22", alignSelf: "center", marginBottom: 14 }]}>
+              <Zap color={colors.loss} size={26} />
+            </View>
+            <Text style={styles.modalTitle}>Start Live Trading?</Text>
+            <Text style={styles.modalBody}>
+              Bot will place REAL orders on your Fyers account using REAL money. Trades cannot be undone.
+              {"\n\n"}Make sure you've tested in Paper Mode and reviewed your strategy config.
+            </Text>
+            <View style={styles.modalBtns}>
+              <TouchableOpacity testID="cancel-live" onPress={() => setConfirmLive(false)} style={[styles.modalBtn, { backgroundColor: colors.surfaceElev }]}>
+                <Text style={[styles.bigBtnText, { color: colors.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="confirm-live" onPress={confirmStartLive} disabled={busy} style={[styles.modalBtn, { backgroundColor: colors.loss }]}>
+                <Text style={styles.bigBtnText}>{busy ? "Starting…" : "Start Live Bot"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </SafeAreaView>
   );
@@ -379,6 +402,12 @@ const styles = StyleSheet.create({
   bySymName: { fontFamily: fonts.bodySemi, color: colors.textPrimary, fontSize: 12, width: 80 },
   bySymMeta: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 10, flex: 1 },
   bySymPnl: { fontFamily: fonts.monoBold, fontSize: 12 },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)", justifyContent: "center", alignItems: "center", padding: 20 },
+  modalCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 24, borderWidth: 1, borderColor: colors.border, maxWidth: 420, width: "100%" },
+  modalTitle: { fontFamily: fonts.heading, color: colors.textPrimary, fontSize: 20, textAlign: "center" },
+  modalBody: { fontFamily: fonts.body, color: colors.textSecondary, fontSize: 13, marginTop: 12, lineHeight: 20, textAlign: "center" },
+  modalBtns: { flexDirection: "row", gap: 10, marginTop: 20 },
+  modalBtn: { flex: 1, paddingVertical: 14, borderRadius: 10, alignItems: "center" },
   statsGrid: { flexDirection: "row", gap: 8 },
   statCell: { flex: 1, backgroundColor: colors.bg, borderRadius: 8, padding: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
   statLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, letterSpacing: 1 },
