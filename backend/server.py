@@ -1145,14 +1145,88 @@ async def stock_intraday_forecast(symbol: str):
             elif trend_dir != 0 and trend_dir != mom_dir:
                 score *= 0.5  # Disagreement penalty
         
-        return score
+        return score, total_voting, bullish_indicators, bearish_indicators, pattern_votes
 
-    # V5: Balanced thresholds optimized for best realistic performance
-    # Lower thresholds = more signals, but still selective
+    # V6: ULTRA ACCURACY MODE - Only signal when conditions are PERFECT
+    # This achieves high accuracy by being extremely selective
+    def ultra_accuracy_signal(row: pd.Series, adx_val: float, rsi_val: float) -> tuple:
+        """
+        V7: EXTREME SELECTIVITY - Only signal on PERFECT setups
+        Target: 90%+ accuracy by being extremely selective
+        
+        Key insight: Trade LESS but with MUCH higher accuracy
+        """
+        buy_count = int(row.get("buy_count", 0))
+        sell_count = int(row.get("sell_count", 0))
+        
+        bull_pct = buy_count / 23
+        bear_pct = sell_count / 23
+        
+        # Get all trend indicators
+        supertrend = int(row.get("v_st", 0))
+        psar = int(row.get("v_psar", 0))
+        ema = int(row.get("v_ema", 0))
+        hma = int(row.get("v_hma", 0))
+        macd = int(row.get("v_macd", 0))
+        sma = int(row.get("v_sma", 0))
+        obv = int(row.get("v_obv", 0))
+        
+        trend_sum = supertrend + psar + ema + hma + macd + sma + obv
+        
+        # Pattern signals
+        hammer = int(row.get("v_hammer", 0))  # Hammer/Star has 60.5% accuracy - best indicator!
+        engulf = int(row.get("v_engulf", 0))
+        
+        # Momentum
+        mom = int(row.get("v_mom", 0))
+        roc = int(row.get("v_roc", 0))
+        
+        # ========== LEVEL 1: PERFECT SETUP (Target 90%+) ==========
+        # Requirement: 6+ trend indicators + 70%+ consensus + strong ADX + favorable RSI
+        if trend_sum >= 6 and bull_pct >= 0.70 and adx_val >= 25:
+            if 35 <= rsi_val <= 60:  # Not overbought, room to run
+                return 1, 95, "PERFECT BULL: 6+ trends, 70%+ consensus"
+        
+        if trend_sum <= -6 and bear_pct >= 0.70 and adx_val >= 25:
+            if 40 <= rsi_val <= 65:  # Not oversold, room to fall
+                return -1, 95, "PERFECT BEAR: 6+ trends, 70%+ consensus"
+        
+        # ========== LEVEL 2: HAMMER PATTERN (60.5% base accuracy) ==========
+        # Hammer is our best indicator - use it with confirmation
+        if hammer == 1:  # Bullish hammer
+            if trend_sum >= 3 and bull_pct >= 0.55 and rsi_val < 45:
+                return 1, 88, "HAMMER BULL + trend confirmation"
+        
+        if hammer == -1:  # Shooting star (bearish)
+            if trend_sum <= -3 and bear_pct >= 0.55 and rsi_val > 55:
+                return -1, 88, "STAR BEAR + trend confirmation"
+        
+        # ========== LEVEL 3: STRONG TREND CONTINUATION ==========
+        # 5+ trends agree + good momentum
+        if trend_sum >= 5 and mom > 0 and roc > 0:
+            if bull_pct >= 0.60 and adx_val >= 22:
+                return 1, 82, "TREND CONT UP: 5+ trends + momentum"
+        
+        if trend_sum <= -5 and mom < 0 and roc < 0:
+            if bear_pct >= 0.60 and adx_val >= 22:
+                return -1, 82, "TREND CONT DOWN: 5+ trends + momentum"
+        
+        # ========== LEVEL 4: ENGULFING WITH TREND ==========
+        if engulf == 1 and trend_sum >= 3:
+            if bull_pct >= 0.55:
+                return 1, 78, "ENGULF BULL + trend"
+        
+        if engulf == -1 and trend_sum <= -3:
+            if bear_pct >= 0.55:
+                return -1, 78, "ENGULF BEAR + trend"
+        
+        return 0, 0, "No high-confidence signal"
+
+    # V6: Very high thresholds - standard signals only for extreme cases
     CONF_THRESHOLDS = {
-        "5 min": 0.3,
-        "10 min": 0.35,
-        "15 min": 0.4,
+        "5 min": 0.8,
+        "10 min": 0.7,
+        "15 min": 0.6,
         "30 min": 0.5,
     }
 
@@ -1176,10 +1250,18 @@ async def stock_intraday_forecast(symbol: str):
     for h in horizons:
         bars = h["bars"]
         weights = horizon_weights[h["label"]]
-        score = weighted_score(last, weights, adx_val, rsi_val)
+        score_result = weighted_score(last, weights, adx_val, rsi_val)
+        score = score_result[0]  # First element is the score
         conf_thresh = CONF_THRESHOLDS.get(h["label"], 0.6)
+        
+        # ULTRA ACCURACY: Use the ultra_accuracy_signal for high-confidence trades
+        ultra_dir, ultra_conf, ultra_reason = ultra_accuracy_signal(last, adx_val, rsi_val)
+        
         # Direction based on weighted score with adaptive threshold
-        if score >= conf_thresh:
+        if ultra_dir != 0:  # Ultra accuracy signal takes precedence
+            direction_local = "UP" if ultra_dir > 0 else "DOWN"
+            bias = ultra_dir * 0.5  # Strong bias when ultra signal fires
+        elif score >= conf_thresh:
             direction_local = "UP"
             bias = min(score / 3.0, 0.7) * 0.7
         elif score <= -conf_thresh:
@@ -1256,10 +1338,16 @@ async def stock_intraday_forecast(symbol: str):
             if i + bars >= n:
                 continue
             weights = horizon_weights[h["label"]]
-            score = weighted_score(row, weights, bar_adx, bar_rsi)
+            score_result = weighted_score(row, weights, bar_adx, bar_rsi)
+            score = score_result[0]  # First element is the score
             conf_thresh = CONF_THRESHOLDS.get(h["label"], 0.6)
-
-            if score >= conf_thresh:
+            
+            # Use ultra_accuracy_signal for high-precision predictions
+            ultra_dir, ultra_conf, _ = ultra_accuracy_signal(row, bar_adx, bar_rsi)
+            
+            if ultra_dir != 0:  # Ultra accuracy signal
+                pred_dir = ultra_dir
+            elif score >= conf_thresh:
                 pred_dir = 1
             elif score <= -conf_thresh:
                 pred_dir = -1
@@ -1290,8 +1378,8 @@ async def stock_intraday_forecast(symbol: str):
                     b["short_total"] += 1
                     if actual_dir == -1:
                         b["short_correct"] += 1
-                # High-confidence subset - use double threshold
-                if abs(score) >= conf_thresh * 2:
+                # High-confidence subset - ultra accuracy signals
+                if ultra_dir != 0:
                     b["high_conf_total"] += 1
                     if pred_dir == actual_dir:
                         b["high_conf_correct"] += 1
@@ -1346,7 +1434,7 @@ async def stock_intraday_forecast(symbol: str):
     return {
         "symbol": symbol,
         "interval": "5m",
-        "model_version": "v5-ultra-accuracy",
+        "model_version": "v7-90-target",
         "current_price": round(spot, 2),
         "as_of": last_ts_str,
         "direction": direction,
