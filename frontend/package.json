@@ -4,9 +4,10 @@
   "version": "1.0.0",
   "scripts": {
     "preinstall": "./scripts/check-pkg.js",
-    "start": "serve dist -l tcp://0.0.0.0:3000 --single",
+    "start": "yarn build:web && serve dist -l tcp://0.0.0.0:3000 --single",
     "dev": "expo start --web --port 3000",
     "build:web": "expo export --platform web",
+    "serve": "serve dist -l tcp://0.0.0.0:3000 --single",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
