@@ -131,6 +131,30 @@ def _now_ts() -> float:
     return datetime.now(timezone.utc).timestamp()
 
 
+# Map yfinance symbols (used everywhere in this app) to Fyers symbols.
+# Equities: <TICKER>.NS  →  NSE:<TICKER>-EQ
+# Indices : hardcoded.
+_YF_TO_FYERS_INDEX = {
+    "^NSEI": "NSE:NIFTY50-INDEX",
+    "^BSESN": "BSE:SENSEX-INDEX",
+    "^NSEBANK": "NSE:NIFTYBANK-INDEX",
+}
+
+
+def _yf_to_fyers_symbol(symbol: str) -> Optional[str]:
+    if not symbol:
+        return None
+    if symbol in _YF_TO_FYERS_INDEX:
+        return _YF_TO_FYERS_INDEX[symbol]
+    if symbol.endswith(".NS"):
+        ticker = symbol[:-3]
+        # Fyers uses & not URL-encoded; symbols like M&M are kept as-is.
+        return f"NSE:{ticker}-EQ"
+    if symbol.endswith(".BO"):
+        return f"BSE:{symbol[:-3]}-EQ"
+    return None
+
+
 def fetch_quote(symbol: str) -> dict:
     """Get latest price + 1-day change for a symbol with simple in-memory caching."""
     cached = _quote_cache.get(symbol)
@@ -2135,6 +2159,22 @@ async def _compute_ml_prediction(symbol: str) -> dict:
     spot = float(df["Close"].iloc[-1])
     last_ts = df.index[-1]
     last_ts_str = last_ts.strftime("%Y-%m-%d %H:%M") if hasattr(last_ts, "strftime") else str(last_ts)
+    price_source = "yfinance"
+
+    # Override with Fyers LIVE price when connected (intraday accuracy for entry/SL/target).
+    try:
+        fy_sym = _yf_to_fyers_symbol(symbol)
+        if fy_sym:
+            fy_client = await fyers_int.get_client(db)
+            if fy_client:
+                quotes = await asyncio.to_thread(fyers_int.fetch_quotes_sync, fy_client, [fy_sym])
+                if quotes and quotes[0].get("price"):
+                    spot = float(quotes[0]["price"])
+                    import datetime as _dt_mod
+                    last_ts_str = _dt_mod.datetime.now(_dt_mod.timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M") + " (LIVE)"
+                    price_source = "fyers"
+    except Exception as e:
+        logger.warning(f"Fyers live spot for ML predict {symbol} failed: {e}")
     
     # Overall direction from ML
     up_votes = sum(1 for r in results if r["direction"] == "UP")
@@ -2568,6 +2608,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         "model_type": "ML Ensemble (XGBoost + RandomForest + GradientBoosting)",
         "current_price": round(spot, 2),
         "as_of": last_ts_str,
+        "price_source": price_source,
         "ml_direction": ml_direction,
         "predictions": results,
         "overall_ml_accuracy": round(np.mean(overall_accuracy), 1) if overall_accuracy else 0,
