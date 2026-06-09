@@ -107,9 +107,24 @@ export function MLPredictionCard({ data: initialData, symbol, onRefresh }: Props
           </View>
         </View>
 
-        <View style={styles.reasonBox}>
-          <Text style={styles.reasonText}>{pred.reason}</Text>
+      <View style={styles.accGrid}>
+        <View style={styles.accCell}>
+          <Text style={styles.accLabel}>STANDARD ACC</Text>
+          <Text style={[styles.accVal, { color: pred.backtest_accuracy >= 60 ? colors.profit : colors.warning }]}>
+            {pred.backtest_accuracy.toFixed(1)}%
+          </Text>
+          <View style={styles.accBarBg}>
+            <View style={[styles.accBarFill, { width: `${Math.min(100, pred.backtest_accuracy)}%`, backgroundColor: pred.backtest_accuracy >= 60 ? colors.profit : colors.warning }]} />
+          </View>
         </View>
+        <View style={[styles.accCell, { backgroundColor: colors.profit + "15", borderColor: colors.profit + "44" }]}>
+          <Text style={[styles.accLabel, { color: colors.profit }]}>HIGH CONF ACC 🎯</Text>
+          <Text style={[styles.accVal, { color: colors.profit }]}>
+            {(pred as any).high_conf_accuracy?.toFixed(1) || "N/A"}%
+          </Text>
+          <Text style={styles.hcSignals}>{(pred as any).high_conf_signals || 0} signals</Text>
+        </View>
+      </View>
 
         {/* Model votes */}
         <View style={styles.votesRow}>
@@ -163,6 +178,14 @@ const styles = StyleSheet.create({
   bigVal: { fontFamily: fonts.monoBold, fontSize: 20, marginTop: 4 },
   subText: { fontFamily: fonts.body, color: colors.textSecondary, fontSize: 10, marginTop: 2 },
   modelName: { fontFamily: fonts.bodySemi, color: colors.accent, fontSize: 14, marginTop: 4 },
+
+  accGrid: { flexDirection: "row", gap: 8, marginTop: 10 },
+  accCell: { flex: 1, backgroundColor: colors.bg, borderRadius: 10, padding: 10, borderWidth: 1, borderColor: colors.border, alignItems: "center" },
+  accLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 9, letterSpacing: 1 },
+  accVal: { fontFamily: fonts.monoBold, fontSize: 22, marginTop: 4 },
+  accBarBg: { height: 4, width: "100%", backgroundColor: colors.surface, borderRadius: 2, marginTop: 6, overflow: "hidden" },
+  accBarFill: { height: 4, borderRadius: 2 },
+  hcSignals: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 9, marginTop: 4 },
 
   reasonBox: { marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   reasonText: { fontFamily: fonts.body, color: colors.textSecondary, fontSize: 11 },
