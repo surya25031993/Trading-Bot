@@ -164,6 +164,13 @@ export const api = {
   botDecisions: (limit = 50) => req<any[]>(`/bot/decisions?limit=${limit}`),
   botClearDecisions: () => req("/bot/decisions", { method: "DELETE" }),
   botStats: () => req<any>("/bot/stats"),
+
+  // ============ Signal Bot (one-tap per-prediction) ============
+  signalBotStart: (symbol: string, mode: "paper" | "live") =>
+    req<any>(`/signal-bot/start?symbol=${encodeURIComponent(symbol)}&mode=${mode}`, { method: "POST" }),
+  signalBotTrades: (limit = 50) => req<any[]>(`/signal-bot/trades?limit=${limit}`),
+  signalBotGet: (id: string) => req<any>(`/signal-bot/trades/${id}`),
+  signalBotStop: (id: string) => req<any>(`/signal-bot/trades/${id}/stop`, { method: "POST" }),
 };
 
 export type OptionLeg = { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium: number; qty: number };

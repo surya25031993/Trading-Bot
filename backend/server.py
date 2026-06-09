@@ -33,6 +33,7 @@ from options import (
 )
 import fyers_integration as fyers_int
 import bot_service
+import signal_bot
 from fastapi.responses import HTMLResponse
 
 ROOT_DIR = Path(__file__).parent
@@ -3171,6 +3172,42 @@ async def bot_start(mode: str = "paper"):
 @api_router.post("/bot/stop")
 async def bot_stop():
     return await bot_service.stop()
+
+# ============ SIGNAL BOT (one-tap per-prediction execution) ============
+@api_router.post("/signal-bot/start")
+async def signal_bot_start(symbol: str, mode: str = "paper"):
+    """Spawn a Signal Bot from the latest ML prediction for `symbol`.
+    Defaults to PAPER mode; pass `mode=live` to also fire real Fyers orders (requires connected account)."""
+    if mode == "live":
+        client = await fyers_int.get_client(db)
+        if not client:
+            raise HTTPException(status_code=400, detail="Live mode requires Fyers connection.")
+    server_module = sys.modules[__name__]
+    result = await signal_bot.start_from_prediction(db, server_module, symbol, mode=mode)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("reason", "Failed to start"))
+    return result
+
+
+@api_router.get("/signal-bot/trades")
+async def signal_bot_trades(limit: int = 50):
+    return await signal_bot.list_trades(db, limit=limit)
+
+
+@api_router.get("/signal-bot/trades/{trade_id}")
+async def signal_bot_get(trade_id: str):
+    t = await signal_bot.get_trade(db, trade_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    return t
+
+
+@api_router.post("/signal-bot/trades/{trade_id}/stop")
+async def signal_bot_stop(trade_id: str):
+    server_module = sys.modules[__name__]
+    return await signal_bot.stop_trade(db, server_module, trade_id)
+
+
 
 
 @api_router.get("/bot/config")

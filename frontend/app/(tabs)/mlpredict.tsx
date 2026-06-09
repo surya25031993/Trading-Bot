@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, fonts } from "@/src/theme";
 import { api, MLPrediction } from "@/src/api";
-import { Brain, TrendingUp, TrendingDown, Minus, RefreshCw, Target, Zap, BarChart2, ArrowDownToLine, ArrowUpFromLine, ShieldAlert, Crosshair, DollarSign, Activity, AlertTriangle } from "lucide-react-native";
+import { Brain, TrendingUp, TrendingDown, Minus, RefreshCw, Target, Zap, BarChart2, ArrowDownToLine, ArrowUpFromLine, ShieldAlert, Crosshair, DollarSign, Activity, AlertTriangle, Bot, Play, Square } from "lucide-react-native";
 
 const SYMBOLS = [
   { symbol: "^NSEI", name: "NIFTY 50" },
@@ -26,6 +26,56 @@ export default function MLPredictScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState("^NSEI");
+  const [botBusy, setBotBusy] = useState(false);
+  const [botToast, setBotToast] = useState<string | null>(null);
+  const [activeBots, setActiveBots] = useState<Record<string, any>>({});
+
+  const refreshActiveBots = useCallback(async () => {
+    try {
+      const trades = await api.signalBotTrades(50);
+      const map: Record<string, any> = {};
+      trades.forEach((t: any) => {
+        if (t.status === "OPEN" || t.status === "PENDING_ENTRY") map[t.symbol] = t;
+      });
+      setActiveBots(map);
+    } catch (e) {
+      // silent — bot panel optional
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshActiveBots();
+    const id = setInterval(refreshActiveBots, 20000);
+    return () => clearInterval(id);
+  }, [refreshActiveBots]);
+
+  const launchBot = useCallback(async (symbol: string, mode: "paper" | "live") => {
+    setBotBusy(true);
+    try {
+      const r = await api.signalBotStart(symbol, mode);
+      setBotToast(`✓ Signal Bot started in ${mode.toUpperCase()} on ${symbol}`);
+      await refreshActiveBots();
+    } catch (e: any) {
+      setBotToast(`Error: ${(e?.message || "failed").slice(0, 140)}`);
+    } finally {
+      setBotBusy(false);
+      setTimeout(() => setBotToast(null), 4500);
+    }
+  }, [refreshActiveBots]);
+
+  const stopBot = useCallback(async (tradeId: string) => {
+    setBotBusy(true);
+    try {
+      await api.signalBotStop(tradeId);
+      setBotToast("✓ Bot stopped & position closed");
+      await refreshActiveBots();
+    } catch (e: any) {
+      setBotToast(`Error: ${(e?.message || "failed").slice(0, 140)}`);
+    } finally {
+      setBotBusy(false);
+      setTimeout(() => setBotToast(null), 4500);
+    }
+  }, [refreshActiveBots]);
 
   const loadAll = useCallback(async () => {
     try {
@@ -378,6 +428,68 @@ export default function MLPredictScreen() {
             <Text style={styles.eeDisclaimer}>
               ⚠️ Trade at your own risk. Always verify with your own analysis.
             </Text>
+
+            {/* === Signal Bot Launch === */}
+            <View style={styles.botPanel} testID="signal-bot-panel">
+              <View style={styles.botHeader}>
+                <Bot color={colors.accent} size={18} />
+                <Text style={styles.botTitle}>SIGNAL BOT</Text>
+                <Text style={styles.botSubtitle}>auto-enter & exit at SL/Target</Text>
+              </View>
+
+              {activeBots[selectedSymbol] ? (
+                <View style={styles.botActiveBox} testID="signal-bot-active">
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.botActiveLabel}>RUNNING · {activeBots[selectedSymbol].mode?.toUpperCase()}</Text>
+                    <Text style={styles.botActiveStatus}>
+                      {activeBots[selectedSymbol].trade_type} · entry ₹{activeBots[selectedSymbol].entry_price?.toLocaleString("en-IN")} · last ₹{activeBots[selectedSymbol].last_price?.toLocaleString("en-IN")}
+                    </Text>
+                    <Text style={styles.botActiveSL}>
+                      SL ₹{activeBots[selectedSymbol].stop_loss_current?.toLocaleString("en-IN")} · T1 ₹{activeBots[selectedSymbol].target_1?.toLocaleString("en-IN")} · T2 ₹{activeBots[selectedSymbol].target_2?.toLocaleString("en-IN")}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    testID="signal-bot-stop"
+                    onPress={() => stopBot(activeBots[selectedSymbol].id)}
+                    disabled={botBusy}
+                    style={styles.botStopBtn}
+                    activeOpacity={0.8}
+                  >
+                    <Square color="#fff" size={14} />
+                    <Text style={styles.botStopText}>Stop</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.botBtnRow}>
+                  <TouchableOpacity
+                    testID="signal-bot-paper"
+                    onPress={() => launchBot(selectedSymbol, "paper")}
+                    disabled={botBusy}
+                    style={[styles.botBtn, { backgroundColor: colors.accent }]}
+                    activeOpacity={0.85}
+                  >
+                    <Play color="#fff" size={14} />
+                    <Text style={styles.botBtnText}>{botBusy ? "Starting…" : "Start Paper Bot"}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    testID="signal-bot-live"
+                    onPress={() => launchBot(selectedSymbol, "live")}
+                    disabled={botBusy}
+                    style={[styles.botBtn, styles.botBtnLive]}
+                    activeOpacity={0.85}
+                  >
+                    <Zap color={colors.loss} size={14} />
+                    <Text style={[styles.botBtnText, { color: colors.loss }]}>Start Live Bot</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {botToast && (
+                <Text style={[styles.botToast, { color: botToast.startsWith("✓") ? colors.profit : colors.loss }]} testID="signal-bot-toast">
+                  {botToast}
+                </Text>
+              )}
+            </View>
           </View>
         )}
 
@@ -723,6 +835,106 @@ const styles = StyleSheet.create({
     textAlign: "center", 
     marginTop: 12, 
     fontStyle: "italic",
+  },
+
+  // Signal Bot panel
+  botPanel: {
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  botHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  botTitle: {
+    color: colors.accent,
+    fontFamily: fonts.heading,
+    fontSize: 13,
+    letterSpacing: 0.6,
+  },
+  botSubtitle: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginLeft: 4,
+  },
+  botBtnRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  botBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    gap: 8,
+  },
+  botBtnLive: {
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: colors.loss,
+  },
+  botBtnText: {
+    color: "#fff",
+    fontFamily: fonts.heading,
+    fontSize: 13,
+    letterSpacing: 0.4,
+  },
+  botActiveBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    backgroundColor: colors.accent + "12",
+    borderWidth: 1,
+    borderColor: colors.accent + "44",
+    borderRadius: 10,
+    gap: 12,
+  },
+  botActiveLabel: {
+    color: colors.accent,
+    fontFamily: fonts.heading,
+    fontSize: 11,
+    letterSpacing: 0.6,
+  },
+  botActiveStatus: {
+    color: colors.textPrimary,
+    fontFamily: fonts.body,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  botActiveSL: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  botStopBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: colors.loss,
+    borderRadius: 8,
+  },
+  botStopText: {
+    color: "#fff",
+    fontFamily: fonts.heading,
+    fontSize: 12,
+    letterSpacing: 0.4,
+  },
+  botToast: {
+    marginTop: 10,
+    fontFamily: fonts.body,
+    fontSize: 12,
+    textAlign: "center",
   },
 
   // Trailing Stop Loss Styles
