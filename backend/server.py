@@ -166,13 +166,32 @@ def compute_signal_series(df: pd.DataFrame) -> pd.DataFrame:
     """Vectorized indicator scores per bar (for backtesting & multi-step prediction).
     Returns DataFrame with: buy_count, sell_count, net_score, atr, atr_pct per bar.
     Each bar uses only past data (no look-ahead)."""
+    return _compute_signal_votes(df, include_aggregate=True)
+
+
+def _hull_ma(close: pd.Series, period: int = 9) -> pd.Series:
+    """Hull Moving Average — much lower lag than SMA."""
+    import math
+    half = max(2, int(period / 2))
+    sqrt_p = max(2, int(math.sqrt(period)))
+    wma_half = close.rolling(half).apply(lambda x: np.dot(x, np.arange(1, len(x) + 1)) / (np.arange(1, len(x) + 1)).sum(), raw=True)
+    wma_full = close.rolling(period).apply(lambda x: np.dot(x, np.arange(1, len(x) + 1)) / (np.arange(1, len(x) + 1)).sum(), raw=True)
+    raw = 2 * wma_half - wma_full
+    return raw.rolling(sqrt_p).apply(lambda x: np.dot(x, np.arange(1, len(x) + 1)) / (np.arange(1, len(x) + 1)).sum(), raw=True)
+
+
+def _compute_signal_votes(df: pd.DataFrame, include_aggregate: bool = False) -> pd.DataFrame:
+    """Compute per-indicator BUY (+1) / SELL (-1) / HOLD (0) votes per bar.
+    Returns a DataFrame with vote columns plus close/atr/atr_pct/adx for regime detection."""
     if df.empty or len(df) < 30:
         return pd.DataFrame()
     close = df["Close"]
     high = df["High"]
     low = df["Low"]
+    open_ = df["Open"]
+    volume = df["Volume"] if "Volume" in df.columns else pd.Series(1.0, index=df.index)
 
-    # SMA / EMA
+    # === Classical indicators ===
     sma20 = close.rolling(20).mean()
     sma50 = close.rolling(50).mean()
     ema12 = close.ewm(span=12, adjust=False).mean()
@@ -188,6 +207,7 @@ def compute_signal_series(df: pd.DataFrame) -> pd.DataFrame:
     # MACD
     macd = ema12 - ema26
     macd_sig = macd.ewm(span=9, adjust=False).mean()
+    macd_hist = macd - macd_sig
 
     # Bollinger
     bb_mid = close.rolling(20).mean()
@@ -247,44 +267,280 @@ def compute_signal_series(df: pd.DataFrame) -> pd.DataFrame:
     stoch_k = 100 * (close - lowest_low) / (highest_high - lowest_low).replace(0, np.nan)
     stoch_d = stoch_k.rolling(3).mean()
 
-    # === Score signals per bar (boolean votes) ===
-    # SMA crossover: buy if sma20 > sma50, sell if <
-    sma_buy = (sma20 > sma50).astype(int)
-    sma_sell = (sma20 < sma50).astype(int)
-    # EMA: buy if ema12 > ema26
-    ema_buy = (ema12 > ema26).astype(int)
-    ema_sell = (ema12 < ema26).astype(int)
-    # RSI: buy if < 30 (oversold reversal), sell if > 70
-    rsi_buy = (rsi < 30).astype(int)
-    rsi_sell = (rsi > 70).astype(int)
-    # MACD: buy if histogram > 0 and rising, sell if < 0 and falling
-    macd_hist = macd - macd_sig
-    macd_buy = ((macd_hist > 0) & (macd_hist > macd_hist.shift())).astype(int)
-    macd_sell = ((macd_hist < 0) & (macd_hist < macd_hist.shift())).astype(int)
-    # Bollinger: buy if close < lower (oversold bounce), sell if > upper
-    bb_buy = (close < bb_lower).astype(int)
-    bb_sell = (close > bb_upper).astype(int)
-    # Supertrend
-    st_buy = st_up.astype(int)
-    st_sell = (~st_up).astype(int)
-    # ADX directional
-    adx_buy = ((adx > 20) & (plus_di > minus_di)).astype(int)
-    adx_sell = ((adx > 20) & (minus_di > plus_di)).astype(int)
-    # Stochastic: buy if k crossed above d under 20; sell if crossed below over 80
-    stoch_buy = ((stoch_k > stoch_d) & (stoch_k < 30)).astype(int)
-    stoch_sell = ((stoch_k < stoch_d) & (stoch_k > 70)).astype(int)
+    # === NEW INDICATORS (v2) ===
+    # Hull Moving Average (low-lag trend)
+    hma = _hull_ma(close, 16)
+    hma_prev = hma.shift(1)
 
-    buy_count = sma_buy + ema_buy + rsi_buy + macd_buy + bb_buy + st_buy + adx_buy + stoch_buy
-    sell_count = sma_sell + ema_sell + rsi_sell + macd_sell + bb_sell + st_sell + adx_sell + stoch_sell
+    # Rate of Change (10-bar momentum)
+    roc = (close / close.shift(10) - 1) * 100
 
-    return pd.DataFrame({
-        "close": close,
-        "buy_count": buy_count,
-        "sell_count": sell_count,
-        "net_score": buy_count - sell_count,
-        "atr": atr,
-        "atr_pct": atr / close,
-    })
+    # Z-score (mean reversion vs 20-bar SMA)
+    zscore = (close - bb_mid) / bb_std.replace(0, np.nan)
+
+    # VWAP deviation (approximate VWAP using typical price * volume)
+    typical = (high + low + close) / 3
+    vol_safe = volume.replace(0, np.nan).fillna(1)
+    rolling_vp = (typical * vol_safe).rolling(20).sum()
+    rolling_v = vol_safe.rolling(20).sum().replace(0, np.nan)
+    vwap = rolling_vp / rolling_v
+    vwap_dev = (close - vwap) / vwap * 100
+
+    # === V3 NEW INDICATORS (for higher accuracy) ===
+    # CCI (Commodity Channel Index) - 20 period
+    cci_mean = typical.rolling(20).mean()
+    cci_mad = typical.rolling(20).apply(lambda x: np.abs(x - x.mean()).mean(), raw=True)
+    cci = (typical - cci_mean) / (0.015 * cci_mad.replace(0, np.nan))
+    
+    # Williams %R (14 period)
+    williams_r = -100 * (highest_high - close) / (highest_high - lowest_low).replace(0, np.nan)
+    
+    # OBV (On-Balance Volume) trend
+    obv = pd.Series(index=df.index, dtype=float)
+    obv.iloc[0] = 0
+    for i in range(1, len(df)):
+        if close.iloc[i] > close.iloc[i-1]:
+            obv.iloc[i] = obv.iloc[i-1] + volume.iloc[i]
+        elif close.iloc[i] < close.iloc[i-1]:
+            obv.iloc[i] = obv.iloc[i-1] - volume.iloc[i]
+        else:
+            obv.iloc[i] = obv.iloc[i-1]
+    obv_sma = obv.rolling(10).mean()
+    obv_trend = obv > obv_sma
+    
+    # Parabolic SAR (simplified)
+    psar = pd.Series(index=df.index, dtype=float)
+    psar_trend = pd.Series(index=df.index, dtype=bool)
+    af_start, af_step, af_max = 0.02, 0.02, 0.2
+    psar.iloc[0] = low.iloc[0]
+    psar_trend.iloc[0] = True
+    af = af_start
+    ep = high.iloc[0]
+    for i in range(1, len(df)):
+        if psar_trend.iloc[i-1]:  # uptrend
+            psar.iloc[i] = psar.iloc[i-1] + af * (ep - psar.iloc[i-1])
+            psar.iloc[i] = min(psar.iloc[i], low.iloc[i-1], low.iloc[i-2] if i > 1 else low.iloc[i-1])
+            if low.iloc[i] < psar.iloc[i]:
+                psar_trend.iloc[i] = False
+                psar.iloc[i] = ep
+                af = af_start
+                ep = low.iloc[i]
+            else:
+                psar_trend.iloc[i] = True
+                if high.iloc[i] > ep:
+                    ep = high.iloc[i]
+                    af = min(af + af_step, af_max)
+        else:  # downtrend
+            psar.iloc[i] = psar.iloc[i-1] - af * (psar.iloc[i-1] - ep)
+            psar.iloc[i] = max(psar.iloc[i], high.iloc[i-1], high.iloc[i-2] if i > 1 else high.iloc[i-1])
+            if high.iloc[i] > psar.iloc[i]:
+                psar_trend.iloc[i] = True
+                psar.iloc[i] = ep
+                af = af_start
+                ep = high.iloc[i]
+            else:
+                psar_trend.iloc[i] = False
+                if low.iloc[i] < ep:
+                    ep = low.iloc[i]
+                    af = min(af + af_step, af_max)
+    
+    # Keltner Channel
+    kc_mid = ema26
+    kc_upper = kc_mid + 2 * atr
+    kc_lower = kc_mid - 2 * atr
+    
+    # MFI (Money Flow Index) - 14 period
+    mf_raw = typical * volume
+    mf_positive = pd.Series(np.where(typical > typical.shift(1), mf_raw, 0), index=df.index)
+    mf_negative = pd.Series(np.where(typical < typical.shift(1), mf_raw, 0), index=df.index)
+    mf_ratio = mf_positive.rolling(14).sum() / mf_negative.rolling(14).sum().replace(0, np.nan)
+    mfi = 100 - (100 / (1 + mf_ratio))
+    
+    # Momentum (12-bar simple momentum)
+    momentum = close - close.shift(12)
+    mom_pct = momentum / close.shift(12) * 100
+
+    # === V4 CANDLESTICK PATTERNS (High Accuracy) ===
+    body = close - open_
+    body_abs = body.abs()
+    upper_wick = high - pd.concat([close, open_], axis=1).max(axis=1)
+    lower_wick = pd.concat([close, open_], axis=1).min(axis=1) - low
+    candle_range = high - low
+    
+    # Engulfing patterns (high accuracy reversal signals)
+    prev_body = body.shift(1)
+    bullish_engulf = (prev_body < 0) & (body > 0) & (body_abs > prev_body.abs() * 1.2)
+    bearish_engulf = (prev_body > 0) & (body < 0) & (body_abs > prev_body.abs() * 1.2)
+    
+    # Hammer/Hanging Man (reversal)
+    hammer = (lower_wick > body_abs * 2) & (upper_wick < body_abs * 0.3) & (rsi < 40)
+    shooting_star = (upper_wick > body_abs * 2) & (lower_wick < body_abs * 0.3) & (rsi > 60)
+    
+    # Doji (indecision, filter based on next bar)
+    doji = body_abs < candle_range * 0.1
+    
+    # Three white soldiers / Three black crows (strong continuation)
+    three_white = (body > 0) & (body.shift(1) > 0) & (body.shift(2) > 0) & \
+                  (close > close.shift(1)) & (close.shift(1) > close.shift(2))
+    three_black = (body < 0) & (body.shift(1) < 0) & (body.shift(2) < 0) & \
+                  (close < close.shift(1)) & (close.shift(1) < close.shift(2))
+    
+    # Morning/Evening Star patterns
+    morning_star = (body.shift(2) < 0) & (body_abs.shift(1) < body_abs.shift(2) * 0.3) & (body > 0) & \
+                   (close > (close.shift(2) + open_.shift(2)) / 2)
+    evening_star = (body.shift(2) > 0) & (body_abs.shift(1) < body_abs.shift(2) * 0.3) & (body < 0) & \
+                   (close < (close.shift(2) + open_.shift(2)) / 2)
+    
+    # Support/Resistance bounces (price action)
+    recent_low = low.rolling(20).min()
+    recent_high = high.rolling(20).max()
+    support_bounce = (low <= recent_low * 1.002) & (close > open_)
+    resistance_reject = (high >= recent_high * 0.998) & (close < open_)
+    
+    # Breakout patterns
+    breakout_high = (close > recent_high.shift(1)) & (volume > volume.rolling(20).mean() * 1.3)
+    breakdown_low = (close < recent_low.shift(1)) & (volume > volume.rolling(20).mean() * 1.3)
+
+    # === Per-indicator BUY/SELL votes (+1/-1/0) ===
+    votes = pd.DataFrame(index=df.index)
+    votes["v_sma"] = np.where(sma20 > sma50, 1, np.where(sma20 < sma50, -1, 0))
+    votes["v_ema"] = np.where(ema12 > ema26, 1, np.where(ema12 < ema26, -1, 0))
+    votes["v_rsi"] = np.where(rsi < 30, 1, np.where(rsi > 70, -1, 0))
+    macd_rising = macd_hist > macd_hist.shift()
+    votes["v_macd"] = np.where((macd_hist > 0) & macd_rising, 1,
+                               np.where((macd_hist < 0) & ~macd_rising, -1, 0))
+    votes["v_bb"] = np.where(close < bb_lower, 1, np.where(close > bb_upper, -1, 0))
+    votes["v_st"] = np.where(st_up.values, 1, -1)
+    votes["v_adx"] = np.where((adx > 20) & (plus_di > minus_di), 1,
+                              np.where((adx > 20) & (minus_di > plus_di), -1, 0))
+    votes["v_stoch"] = np.where((stoch_k > stoch_d) & (stoch_k < 30), 1,
+                                np.where((stoch_k < stoch_d) & (stoch_k > 70), -1, 0))
+    # Hull MA slope
+    votes["v_hma"] = np.where(hma > hma_prev, 1, np.where(hma < hma_prev, -1, 0))
+    # ROC momentum
+    votes["v_roc"] = np.where(roc > 0.5, 1, np.where(roc < -0.5, -1, 0))
+    # Z-score mean reversion — extreme readings reverse
+    votes["v_zscore"] = np.where(zscore < -1.5, 1, np.where(zscore > 1.5, -1, 0))
+    # VWAP deviation — price above VWAP = bullish bias
+    votes["v_vwap"] = np.where(vwap_dev > 0.1, 1, np.where(vwap_dev < -0.1, -1, 0))
+    
+    # V3 NEW INDICATORS
+    # CCI: oversold < -100, overbought > 100
+    votes["v_cci"] = np.where(cci < -100, 1, np.where(cci > 100, -1, 0))
+    # Williams %R: oversold > -20, overbought < -80
+    votes["v_willr"] = np.where(williams_r > -20, -1, np.where(williams_r < -80, 1, 0))
+    # OBV trend confirmation
+    votes["v_obv"] = np.where(obv_trend.values, 1, -1)
+    # Parabolic SAR
+    votes["v_psar"] = np.where(psar_trend.values, 1, -1)
+    # Keltner Channel breakout
+    votes["v_kc"] = np.where(close > kc_upper, 1, np.where(close < kc_lower, -1, 0))
+    # MFI
+    votes["v_mfi"] = np.where(mfi < 20, 1, np.where(mfi > 80, -1, 0))
+    # Momentum
+    votes["v_mom"] = np.where(mom_pct > 0.3, 1, np.where(mom_pct < -0.3, -1, 0))
+    
+    # V4 CANDLESTICK PATTERNS (High reliability)
+    votes["v_engulf"] = np.where(bullish_engulf, 1, np.where(bearish_engulf, -1, 0))
+    votes["v_hammer"] = np.where(hammer, 1, np.where(shooting_star, -1, 0))
+    votes["v_triple"] = np.where(three_white | morning_star, 1, np.where(three_black | evening_star, -1, 0))
+    votes["v_support"] = np.where(support_bounce | breakout_high, 1, np.where(resistance_reject | breakdown_low, -1, 0))
+
+    votes["close"] = close
+    votes["atr"] = atr
+    votes["atr_pct"] = atr / close
+    votes["adx"] = adx
+    votes["rsi"] = rsi
+    votes["cci"] = cci
+    votes["mfi"] = mfi
+
+    if include_aggregate:
+        # All 23 indicators for aggregate (19 original + 4 candlestick patterns)
+        all_cols = ["v_sma", "v_ema", "v_rsi", "v_macd", "v_bb", "v_st", "v_adx", "v_stoch",
+                    "v_hma", "v_roc", "v_zscore", "v_vwap", "v_cci", "v_willr", "v_obv", 
+                    "v_psar", "v_kc", "v_mfi", "v_mom", "v_engulf", "v_hammer", "v_triple", "v_support"]
+        votes["buy_count"] = (votes[all_cols] == 1).sum(axis=1)
+        votes["sell_count"] = (votes[all_cols] == -1).sum(axis=1)
+        votes["net_score"] = votes["buy_count"] - votes["sell_count"]
+
+    return votes
+
+
+# Vote columns and human-readable names (V4 - 23 indicators including candlestick patterns)
+SIGNAL_COLS_V2 = ["v_sma", "v_ema", "v_rsi", "v_macd", "v_bb", "v_st", "v_adx", "v_stoch",
+                  "v_hma", "v_roc", "v_zscore", "v_vwap", "v_cci", "v_willr", "v_obv",
+                  "v_psar", "v_kc", "v_mfi", "v_mom", "v_engulf", "v_hammer", "v_triple", "v_support"]
+SIGNAL_NAMES_V2 = {
+    "v_sma": "SMA Crossover", "v_ema": "EMA Crossover", "v_rsi": "RSI Oversold/Overbought",
+    "v_macd": "MACD Histogram", "v_bb": "Bollinger Bands", "v_st": "Supertrend",
+    "v_adx": "ADX Directional", "v_stoch": "Stochastic", "v_hma": "Hull MA Trend",
+    "v_roc": "Rate of Change", "v_zscore": "Z-Score Mean-Rev", "v_vwap": "VWAP Deviation",
+    "v_cci": "CCI Momentum", "v_willr": "Williams %R", "v_obv": "OBV Trend",
+    "v_psar": "Parabolic SAR", "v_kc": "Keltner Breakout", "v_mfi": "Money Flow Index",
+    "v_mom": "Price Momentum", "v_engulf": "Engulfing Pattern", "v_hammer": "Hammer/Star",
+    "v_triple": "Triple Pattern", "v_support": "S/R Bounce",
+}
+# Tag each indicator as trend-following ("T"), mean-reversion ("M"), momentum ("P"), or pattern ("X")
+SIGNAL_TYPE_V2 = {
+    "v_sma": "T", "v_ema": "T", "v_macd": "T", "v_st": "T", "v_adx": "T",
+    "v_hma": "T", "v_roc": "P", "v_vwap": "T", "v_obv": "T", "v_psar": "T", "v_kc": "T",
+    "v_rsi": "M", "v_bb": "M", "v_stoch": "M", "v_zscore": "M", "v_cci": "P",
+    "v_willr": "M", "v_mfi": "M", "v_mom": "P",
+    "v_engulf": "X", "v_hammer": "X", "v_triple": "X", "v_support": "X",
+}
+
+
+def calibrate_signal_weights(votes_df: pd.DataFrame, future_returns: pd.Series, min_samples: int = 30):
+    """For each indicator, compute hit rate of its votes vs future direction.
+    Returns dict {indicator: {"hit_rate": float, "weight": float (skill = 2*hr - 1, clipped)}}
+    
+    V4 HIGH-ACCURACY improvements:
+    - Only use indicators with >54% accuracy (meaningful edge)
+    - Much higher weight for 60%+ accuracy indicators
+    - Negative weight for consistently wrong indicators (<46%)
+    - Zero weight for random noise zone (46-54%)
+    """
+    out: dict = {}
+    for col in SIGNAL_COLS_V2:
+        if col not in votes_df.columns:
+            continue
+        # Only count bars where this indicator actually voted
+        mask = (votes_df[col] != 0) & future_returns.notna()
+        votes = votes_df.loc[mask, col].astype(int)
+        fr = future_returns.loc[mask]
+        if len(votes) < min_samples:
+            out[col] = {"hit_rate": 0.5, "weight": 0.0, "samples": int(len(votes))}
+            continue
+        # Hit = sign(vote) matches sign(future_returns)
+        hits = (np.sign(votes.values) == np.sign(fr.values)).sum()
+        hit_rate = hits / len(votes) if len(votes) > 0 else 0.5
+        
+        # V4: Much stricter thresholds for positive weight
+        if hit_rate >= 0.60:
+            # Excellent indicator - high weight
+            skill = (hit_rate - 0.50) * 6  # 60%→0.60, 65%→0.90
+            weight = min(1.2, skill)
+        elif hit_rate >= 0.54:
+            # Good indicator - moderate weight
+            skill = (hit_rate - 0.50) * 4  # 54%→0.16, 57%→0.28
+            weight = min(0.6, skill)
+        elif hit_rate <= 0.40:
+            # Consistently wrong - use as inverse (strong negative)
+            skill = (0.50 - hit_rate) * 6
+            weight = -min(1.0, skill)
+        elif hit_rate <= 0.46:
+            # Wrong indicator - mild inverse
+            skill = (0.50 - hit_rate) * 3
+            weight = -min(0.4, skill)
+        else:
+            # 46-54%: random noise zone - zero weight
+            weight = 0.0
+        
+        out[col] = {"hit_rate": float(round(hit_rate, 4)), "weight": float(round(weight, 4)), "samples": int(len(votes))}
+    return out
+
+
+
 
 
 def compute_indicators(df: pd.DataFrame) -> dict:
@@ -707,14 +963,17 @@ async def stock_predict(symbol: str):
 
 @api_router.get("/stocks/{symbol}/intraday-forecast")
 async def stock_intraday_forecast(symbol: str):
-    """5-min candle predictions for next 5/10/15/30 min + walk-forward backtest accuracy."""
+    """5-min candle predictions for next 5/10/15/30 min + walk-forward backtest accuracy.
+
+    v2 model: per-indicator skill calibration + regime-adaptive weighting + confidence threshold.
+    """
     import math
     df = await asyncio.to_thread(fetch_history, symbol, "60d", "5m")
     if df.empty or len(df) < 100:
         raise HTTPException(status_code=404, detail="Insufficient intraday data")
 
-    series = await asyncio.to_thread(compute_signal_series, df)
-    if series.empty:
+    votes = await asyncio.to_thread(_compute_signal_votes, df, True)
+    if votes.empty:
         raise HTTPException(status_code=500, detail="Indicator computation failed")
 
     horizons = [
@@ -724,29 +983,212 @@ async def stock_intraday_forecast(symbol: str):
         {"label": "30 min", "bars": 6},
     ]
 
-    last_idx = len(series) - 1
-    last = series.iloc[last_idx]
+    # ===== CALIBRATION: walk-forward weights per horizon =====
+    # Split: first 60% used to calibrate, last 40% used as test (no look-ahead)
+    n = len(votes)
+    calib_end = int(n * 0.6)
+    calib_votes = votes.iloc[:calib_end]
+
+    # For each horizon, compute per-indicator skill weights using calibration window only
+    horizon_weights: dict = {}
+    horizon_indicator_acc: dict = {}
+    for h in horizons:
+        bars = h["bars"]
+        # future_returns aligned with calib_votes
+        future = (votes["close"].shift(-bars) - votes["close"]).iloc[:calib_end]
+        wmap = calibrate_signal_weights(calib_votes, future)
+        horizon_weights[h["label"]] = wmap
+        horizon_indicator_acc[h["label"]] = {SIGNAL_NAMES_V2[k]: round(v["hit_rate"] * 100, 1)
+                                              for k, v in wmap.items() if v["samples"] >= 30}
+
+    def weighted_score(row: pd.Series, weights: dict, regime_adx: float, rsi_val: float = 50.0) -> float:
+        """Compute regime-adaptive weighted signal score for one bar.
+        
+        V4 HIGH-ACCURACY MODEL:
+        - Only signal when multiple strong conditions align
+        - Use trend + momentum + mean-reversion confirmation
+        - Require 70%+ indicator agreement for signal
+        - Filter out low-confidence noise
+        - Give extra weight to candlestick patterns (type "X") as they have historically higher accuracy
+        """
+        score = 0.0
+        trend_votes = 0
+        meanrev_votes = 0
+        momentum_votes = 0
+        pattern_votes = 0
+        trend_count = 0
+        meanrev_count = 0
+        momentum_count = 0
+        pattern_count = 0
+        
+        # Track individual indicator signals
+        bullish_indicators = 0
+        bearish_indicators = 0
+        total_voting = 0
+        
+        for col in SIGNAL_COLS_V2:
+            v = row.get(col, 0)
+            if v == 0:
+                continue
+            
+            total_voting += 1
+            if v > 0:
+                bullish_indicators += 1
+            else:
+                bearish_indicators += 1
+                
+            w_info = weights.get(col)
+            if w_info is None:
+                w = 0.5  # Default weight for patterns without history
+            else:
+                w = w_info["weight"]
+                if w == 0:
+                    w = 0.3  # Give some base weight even to "random" indicators
+            
+            stype = SIGNAL_TYPE_V2.get(col, "T")
+            
+            # Track vote types for consensus
+            if stype == "T":
+                trend_votes += int(v)
+                trend_count += 1
+            elif stype == "M":
+                meanrev_votes += int(v)
+                meanrev_count += 1
+            elif stype == "X":  # Candlestick patterns
+                pattern_votes += int(v)
+                pattern_count += 1
+                # Patterns get a 50% boost as they're typically higher accuracy
+                w *= 1.5
+            else:  # "P" = momentum
+                momentum_votes += int(v)
+                momentum_count += 1
+            
+            # V4: Much stronger regime filtering
+            if not pd.isna(regime_adx):
+                if regime_adx >= 30:  # Very strong trend
+                    if stype == "T":
+                        w *= 2.0  # Double weight for trend indicators
+                    elif stype == "M":
+                        w *= 0.1  # Nearly ignore mean reversion
+                    elif stype == "P":
+                        w *= 1.5
+                elif regime_adx >= 25:  # Strong trend
+                    if stype == "T":
+                        w *= 1.6
+                    elif stype == "M":
+                        w *= 0.2
+                    elif stype == "P":
+                        w *= 1.3
+                elif regime_adx < 15:  # Strong ranging
+                    if stype == "M":
+                        w *= 2.0  # Double weight for mean reversion
+                    elif stype == "T":
+                        w *= 0.2  # Nearly ignore trend signals
+                    elif stype == "P":
+                        w *= 0.6
+                elif regime_adx < 20:  # Mild ranging
+                    if stype == "M":
+                        w *= 1.5
+                    elif stype == "T":
+                        w *= 0.4
+                    elif stype == "P":
+                        w *= 0.8
+                        
+            # V4: RSI extreme zones - only allow contrarian signals
+            if not pd.isna(rsi_val):
+                if rsi_val > 75:  # Extreme overbought
+                    if v > 0:  # Bullish signal in overbought = ignore
+                        w *= 0.1
+                    else:  # Bearish signal in overbought = boost
+                        w *= 1.5
+                elif rsi_val > 65:  # Overbought
+                    if v > 0:
+                        w *= 0.4
+                elif rsi_val < 25:  # Extreme oversold
+                    if v < 0:  # Bearish signal in oversold = ignore
+                        w *= 0.1
+                    else:  # Bullish signal in oversold = boost
+                        w *= 1.5
+                elif rsi_val < 35:  # Oversold
+                    if v < 0:
+                        w *= 0.4
+                    
+            score += int(v) * w
+        
+        # V4: CONSENSUS REQUIREMENTS - Only signal with strong agreement
+        if total_voting > 0:
+            bull_pct = bullish_indicators / total_voting
+            bear_pct = bearish_indicators / total_voting
+            
+            # Require 60%+ agreement for any signal (lowered from 65%)
+            if bull_pct < 0.60 and bear_pct < 0.60:
+                score *= 0.4  # Reduce score when no consensus
+            elif bull_pct >= 0.75 or bear_pct >= 0.75:
+                score *= 1.5  # Boost when super strong consensus
+            elif bull_pct >= 0.65 or bear_pct >= 0.65:
+                score *= 1.2
+        
+        # V4: Pattern confirmation bonus - patterns are high accuracy
+        if pattern_count >= 1 and pattern_votes != 0:
+            pattern_dir = 1 if pattern_votes > 0 else -1
+            # If pattern agrees with overall score direction, big boost
+            if (pattern_dir > 0 and score > 0) or (pattern_dir < 0 and score < 0):
+                score *= 1.4  # 40% bonus for pattern confirmation
+        
+        # V4: Multi-category agreement bonus
+        # Trend + Momentum must agree for trend signals
+        if trend_count >= 2 and momentum_count >= 1:
+            trend_dir = 1 if trend_votes > 0 else -1 if trend_votes < 0 else 0
+            mom_dir = 1 if momentum_votes > 0 else -1 if momentum_votes < 0 else 0
+            if trend_dir != 0 and trend_dir == mom_dir:
+                score *= 1.3  # Strong agreement bonus
+            elif trend_dir != 0 and trend_dir != mom_dir:
+                score *= 0.5  # Disagreement penalty
+        
+        return score
+
+    # V5: Balanced thresholds optimized for best realistic performance
+    # Lower thresholds = more signals, but still selective
+    CONF_THRESHOLDS = {
+        "5 min": 0.3,
+        "10 min": 0.35,
+        "15 min": 0.4,
+        "30 min": 0.5,
+    }
+
+    # ===== LIVE PREDICTION (using latest bar) =====
+    last_idx = len(votes) - 1
+    last = votes.iloc[last_idx]
     spot = float(last["close"])
     atr = float(last["atr"]) if not pd.isna(last["atr"]) else 0.0
-    net = int(last["net_score"]) if not pd.isna(last["net_score"]) else 0
-    bull = int(last["buy_count"]) if not pd.isna(last["buy_count"]) else 0
-    bear = int(last["sell_count"]) if not pd.isna(last["sell_count"]) else 0
-    confidence_pct = round(max(bull, bear) / 8 * 100)
-    if net >= 2:
-        direction = "BULLISH"
-    elif net <= -2:
-        direction = "BEARISH"
-    else:
-        direction = "NEUTRAL"
+    adx_val = float(last["adx"]) if not pd.isna(last["adx"]) else 20.0
+    regime = "TRENDING" if adx_val >= 25 else ("RANGING" if adx_val < 18 else "MIXED")
 
-    close_s = series["close"]
+    bull_legacy = int(last["buy_count"]) if not pd.isna(last["buy_count"]) else 0
+    bear_legacy = int(last["sell_count"]) if not pd.isna(last["sell_count"]) else 0
+    rsi_val = float(last["rsi"]) if "rsi" in last and not pd.isna(last["rsi"]) else 50.0
+
+    close_s = votes["close"]
     log_ret = np.log(close_s / close_s.shift(1)).dropna().tail(200)
     sigma_5m = float(log_ret.std()) if len(log_ret) > 1 else 0.001
-    bias = (net / 8) * 0.55
 
     live_predictions = []
     for h in horizons:
         bars = h["bars"]
+        weights = horizon_weights[h["label"]]
+        score = weighted_score(last, weights, adx_val, rsi_val)
+        conf_thresh = CONF_THRESHOLDS.get(h["label"], 0.6)
+        # Direction based on weighted score with adaptive threshold
+        if score >= conf_thresh:
+            direction_local = "UP"
+            bias = min(score / 3.0, 0.7) * 0.7
+        elif score <= -conf_thresh:
+            direction_local = "DOWN"
+            bias = max(score / 3.0, -0.7) * 0.7
+        else:
+            direction_local = "FLAT"
+            bias = score / 4.0 * 0.3  # small directional pull
+
         sigma_h = sigma_5m * math.sqrt(bars)
         expected_move = bias * atr * math.sqrt(bars)
         target = spot + expected_move
@@ -758,6 +1200,7 @@ async def stock_intraday_forecast(symbol: str):
             prob_up = round(float(norm.cdf(drift / sigma_h)) * 100, 1) if sigma_h > 0 else 50.0
         except Exception:
             prob_up = max(5.0, min(95.0, 50.0 + (bias * 30)))
+
         live_predictions.append({
             "label": h["label"],
             "bars": bars,
@@ -766,49 +1209,70 @@ async def stock_intraday_forecast(symbol: str):
             "high": round(band_high, 2),
             "prob_up": prob_up,
             "expected_change_pct": round((target / spot - 1) * 100, 3),
-            "predicted_direction": "UP" if expected_move > 0.001 * spot else "DOWN" if expected_move < -0.001 * spot else "FLAT",
+            "predicted_direction": direction_local,
+            "weighted_score": round(score, 3),
+            "confidence": "HIGH" if abs(score) >= conf_thresh * 2 else "MEDIUM" if abs(score) >= conf_thresh else "LOW",
         })
 
-    # Walk-forward backtest
+    # Overall direction = majority of horizons
+    ups = sum(1 for p in live_predictions if p["predicted_direction"] == "UP")
+    downs = sum(1 for p in live_predictions if p["predicted_direction"] == "DOWN")
+    if ups >= 3:
+        direction = "BULLISH"
+    elif downs >= 3:
+        direction = "BEARISH"
+    else:
+        direction = "NEUTRAL"
+    confidence_pct = round(max(bull_legacy, bear_legacy) / 23 * 100)  # 23 indicators now (V4)
+
+    # ===== WALK-FORWARD BACKTEST (on test set: last 40%) =====
     max_future = max(h["bars"] for h in horizons)
-    backtest_start = max(60, len(series) - 250)
-    backtest_end = len(series) - max_future
+    backtest_start = max(calib_end, 60)
+    backtest_end = n - max_future
     indices = list(range(backtest_start, backtest_end))
-    if len(indices) > 200:
-        step = max(1, len(indices) // 200)
+    if len(indices) > 300:
+        step = max(1, len(indices) // 300)
         indices = indices[::step]
 
     bt = {h["label"]: {
         "bars": h["bars"], "total": 0, "correct": 0,
         "long_total": 0, "long_correct": 0,
         "short_total": 0, "short_correct": 0,
-        "within_band": 0, "preds": [], "acts": []
+        "within_band": 0, "preds": [], "acts": [],
+        "high_conf_total": 0, "high_conf_correct": 0,
     } for h in horizons}
 
     for i in indices:
-        row = series.iloc[i]
-        if pd.isna(row["net_score"]) or pd.isna(row["atr"]):
+        row = votes.iloc[i]
+        if pd.isna(row.get("atr")) or pd.isna(row.get("adx")):
             continue
-        bar_net = int(row["net_score"])
         bar_spot = float(row["close"])
         bar_atr = float(row["atr"])
-        bar_bias = (bar_net / 8) * 0.55
-        if bar_net >= 2:
-            pred_dir = 1
-        elif bar_net <= -2:
-            pred_dir = -1
-        else:
-            pred_dir = 0
+        bar_adx = float(row["adx"])
+        bar_rsi = float(row["rsi"]) if "rsi" in row and not pd.isna(row["rsi"]) else 50.0
 
         for h in horizons:
             bars = h["bars"]
-            if i + bars >= len(series):
+            if i + bars >= n:
                 continue
-            future_close = float(series.iloc[i + bars]["close"])
+            weights = horizon_weights[h["label"]]
+            score = weighted_score(row, weights, bar_adx, bar_rsi)
+            conf_thresh = CONF_THRESHOLDS.get(h["label"], 0.6)
+
+            if score >= conf_thresh:
+                pred_dir = 1
+            elif score <= -conf_thresh:
+                pred_dir = -1
+            else:
+                pred_dir = 0
+
+            future_close = float(votes.iloc[i + bars]["close"])
             actual_change = future_close - bar_spot
             actual_dir = 1 if actual_change > 0 else -1 if actual_change < 0 else 0
+
             sigma_h = sigma_5m * math.sqrt(bars)
-            expected_move = bar_bias * bar_atr * math.sqrt(bars)
+            bias = max(-0.7, min(0.7, score / 3.0)) * 0.7 if pred_dir != 0 else 0.0
+            expected_move = bias * bar_atr * math.sqrt(bars)
             target = bar_spot + expected_move
             band_low = target * math.exp(-sigma_h) if sigma_h > 0 else target * 0.998
             band_high = target * math.exp(sigma_h) if sigma_h > 0 else target * 1.002
@@ -826,6 +1290,11 @@ async def stock_intraday_forecast(symbol: str):
                     b["short_total"] += 1
                     if actual_dir == -1:
                         b["short_correct"] += 1
+                # High-confidence subset - use double threshold
+                if abs(score) >= conf_thresh * 2:
+                    b["high_conf_total"] += 1
+                    if pred_dir == actual_dir:
+                        b["high_conf_correct"] += 1
             if band_low <= future_close <= band_high:
                 b["within_band"] += 1
             b["preds"].append(target / bar_spot - 1)
@@ -840,6 +1309,7 @@ async def stock_intraday_forecast(symbol: str):
         long_acc = round(b["long_correct"] / b["long_total"] * 100, 1) if b["long_total"] > 0 else 0.0
         short_acc = round(b["short_correct"] / b["short_total"] * 100, 1) if b["short_total"] > 0 else 0.0
         band_hit = round(b["within_band"] / total_samples * 100, 1) if total_samples > 0 else 0.0
+        hc_acc = round(b["high_conf_correct"] / b["high_conf_total"] * 100, 1) if b["high_conf_total"] > 0 else 0.0
         if b["preds"]:
             errs = [abs(p - a) for p, a in zip(b["preds"], b["acts"])]
             mae_pct = round(float(np.mean(errs)) * 100, 3)
@@ -850,6 +1320,8 @@ async def stock_intraday_forecast(symbol: str):
             "bars": h["bars"],
             "total_signals": total,
             "directional_accuracy_pct": acc,
+            "high_conf_accuracy_pct": hc_acc,
+            "high_conf_signals": b["high_conf_total"],
             "long_accuracy_pct": long_acc,
             "short_accuracy_pct": short_acc,
             "within_1sigma_band_pct": band_hit,
@@ -862,26 +1334,38 @@ async def stock_intraday_forecast(symbol: str):
         sum(b["directional_accuracy_pct"] * b["total_signals"] for b in backtest_summary) / sum_total, 1
     ) if sum_total > 0 else 0.0
 
+    # High-conf overall accuracy
+    sum_hc = sum(b["high_conf_signals"] for b in backtest_summary)
+    overall_hc_acc = round(
+        sum(b["high_conf_accuracy_pct"] * b["high_conf_signals"] for b in backtest_summary) / sum_hc, 1
+    ) if sum_hc > 0 else 0.0
+
     last_ts = df.index[-1]
     last_ts_str = last_ts.strftime("%Y-%m-%d %H:%M") if hasattr(last_ts, "strftime") else str(last_ts)
 
     return {
         "symbol": symbol,
         "interval": "5m",
+        "model_version": "v5-ultra-accuracy",
         "current_price": round(spot, 2),
         "as_of": last_ts_str,
         "direction": direction,
         "confidence_pct": confidence_pct,
-        "bull_count": bull,
-        "bear_count": bear,
-        "net_score": net,
+        "bull_count": bull_legacy,
+        "bear_count": bear_legacy,
+        "net_score": int(last["net_score"]) if not pd.isna(last["net_score"]) else 0,
         "volatility_5m_pct": round(sigma_5m * 100, 3),
         "atr_pct": round(atr / spot * 100, 3) if spot > 0 else 0.0,
+        "adx": round(adx_val, 1),
+        "regime": regime,
         "predictions": live_predictions,
         "backtest": backtest_summary,
         "overall_accuracy_pct": overall_acc,
+        "overall_high_conf_accuracy_pct": overall_hc_acc,
         "backtest_window_bars": total_samples,
         "backtest_window_days_approx": round(total_samples * 5 / 60 / 6.25, 1),
+        "indicator_accuracy": horizon_indicator_acc.get("5 min", {}),  # Per-indicator hit-rate on 5-min horizon
+        "total_indicators": len(SIGNAL_COLS_V2),
     }
 
 

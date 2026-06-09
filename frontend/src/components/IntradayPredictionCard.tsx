@@ -1,11 +1,64 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import React, { useState, useEffect, useCallback } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
 import { colors, fonts } from "@/src/theme";
-import { IntradayForecast } from "@/src/api";
-import { Activity, TrendingUp, TrendingDown, Minus, Target, History } from "lucide-react-native";
+import { IntradayForecast, api } from "@/src/api";
+import { Activity, TrendingUp, TrendingDown, Minus, Target, History, RefreshCw, Zap } from "lucide-react-native";
 
-export function IntradayPredictionCard({ data }: { data: IntradayForecast }) {
-  const [selected, setSelected] = useState(0); // index into data.predictions
+interface Props {
+  data: IntradayForecast;
+  symbol: string;
+  onRefresh?: (newData: IntradayForecast) => void;
+}
+
+export function IntradayPredictionCard({ data: initialData, symbol, onRefresh }: Props) {
+  const [data, setData] = useState(initialData);
+  const [selected, setSelected] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [countdown, setCountdown] = useState(60); // seconds until next refresh
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  // Auto-refresh every 60 seconds
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    const refreshTimer = setInterval(async () => {
+      try {
+        setRefreshing(true);
+        const newData = await api.stockIntradayForecast(symbol);
+        setData(newData);
+        onRefresh?.(newData);
+        setCountdown(60);
+      } catch (e) {
+        console.warn("Auto-refresh failed:", e);
+      } finally {
+        setRefreshing(false);
+      }
+    }, 60000); // 60 seconds
+
+    // Countdown timer
+    const countdownTimer = setInterval(() => {
+      setCountdown((c) => (c > 0 ? c - 1 : 60));
+    }, 1000);
+
+    return () => {
+      clearInterval(refreshTimer);
+      clearInterval(countdownTimer);
+    };
+  }, [autoRefresh, symbol, onRefresh]);
+
+  const manualRefresh = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const newData = await api.stockIntradayForecast(symbol);
+      setData(newData);
+      onRefresh?.(newData);
+      setCountdown(60);
+    } catch (e) {
+      console.warn("Manual refresh failed:", e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [symbol, onRefresh]);
 
   const dirColor = data.direction === "BULLISH" ? colors.profit : data.direction === "BEARISH" ? colors.loss : colors.warning;
   const DirIcon = data.direction === "BULLISH" ? TrendingUp : data.direction === "BEARISH" ? TrendingDown : Minus;
@@ -17,6 +70,7 @@ export function IntradayPredictionCard({ data }: { data: IntradayForecast }) {
   // Accuracy color
   const accColor = bt.directional_accuracy_pct >= 55 ? colors.profit : bt.directional_accuracy_pct >= 45 ? colors.warning : colors.loss;
   const bandColor = bt.within_1sigma_band_pct >= 65 ? colors.profit : bt.within_1sigma_band_pct >= 50 ? colors.warning : colors.loss;
+  const hcAccColor = data.overall_high_conf_accuracy_pct >= 55 ? colors.profit : data.overall_high_conf_accuracy_pct >= 50 ? colors.warning : colors.loss;
 
   return (
     <View style={styles.container}>
@@ -24,15 +78,42 @@ export function IntradayPredictionCard({ data }: { data: IntradayForecast }) {
         <View style={styles.titleRow}>
           <Activity color={colors.accent} size={14} />
           <Text style={styles.title}>INTRADAY FORECAST</Text>
-          <Text style={styles.interval}>· 5-min candles</Text>
+          <Text style={styles.interval}>· 5m candles</Text>
         </View>
-        <View style={[styles.dirPill, { backgroundColor: dirColor + "22", borderColor: dirColor }]}>
-          <DirIcon color={dirColor} size={11} />
-          <Text style={[styles.dirPillText, { color: dirColor }]}>{data.direction}</Text>
+        <View style={styles.headerRight}>
+          {refreshing ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : (
+            <TouchableOpacity onPress={manualRefresh} style={styles.refreshBtn}>
+              <RefreshCw color={colors.textSecondary} size={14} />
+            </TouchableOpacity>
+          )}
+          <View style={[styles.dirPill, { backgroundColor: dirColor + "22", borderColor: dirColor }]}>
+            <DirIcon color={dirColor} size={11} />
+            <Text style={[styles.dirPillText, { color: dirColor }]}>{data.direction}</Text>
+          </View>
         </View>
       </View>
 
-      <Text style={styles.asOf}>As of {data.as_of} · {data.bull_count} BUY · {data.bear_count} SELL of 8 algos</Text>
+      {/* Model & Auto-refresh info */}
+      <View style={styles.modelRow}>
+        <View style={styles.modelBadge}>
+          <Zap color={colors.accent} size={10} />
+          <Text style={styles.modelText}>{data.model_version || "v3"} · {data.total_indicators || 19} algos</Text>
+        </View>
+        <TouchableOpacity 
+          onPress={() => setAutoRefresh(!autoRefresh)} 
+          style={[styles.autoRefreshBadge, { backgroundColor: autoRefresh ? colors.profit + "22" : colors.surface }]}
+        >
+          <Text style={[styles.autoRefreshText, { color: autoRefresh ? colors.profit : colors.textMuted }]}>
+            {autoRefresh ? `⟳ ${countdown}s` : "Auto-refresh OFF"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.asOf}>
+        As of {data.as_of} · {data.bull_count} BUY · {data.bear_count} SELL · Regime: {data.regime || "MIXED"}
+      </Text>
 
       {/* Timeframe tabs */}
       <View style={styles.tabRow}>
@@ -67,6 +148,15 @@ export function IntradayPredictionCard({ data }: { data: IntradayForecast }) {
             </Text>
             <Text style={styles.subText}>{live.predicted_direction}</Text>
           </View>
+          <View style={styles.col}>
+            <Text style={styles.label}>CONFIDENCE</Text>
+            <Text style={[styles.confVal, { 
+              color: live.confidence === "HIGH" ? colors.profit : live.confidence === "MEDIUM" ? colors.warning : colors.textMuted 
+            }]}>
+              {live.confidence}
+            </Text>
+            <Text style={styles.scoreText}>Score: {live.weighted_score?.toFixed(2) || "0"}</Text>
+          </View>
         </View>
         <View style={styles.rangeRow}>
           <Text style={styles.rangeLabel}>1σ RANGE</Text>
@@ -94,31 +184,35 @@ export function IntradayPredictionCard({ data }: { data: IntradayForecast }) {
           <Text style={styles.accSub}>{bt.total_signals} signals</Text>
         </View>
         <View style={styles.accCell}>
-          <Text style={styles.accLabel}>IN-RANGE HIT</Text>
-          <Text style={[styles.accVal, { color: bandColor }]}>{bt.within_1sigma_band_pct.toFixed(1)}%</Text>
+          <Text style={styles.accLabel}>HIGH CONF ACC</Text>
+          <Text style={[styles.accVal, { color: hcAccColor }]}>
+            {bt.high_conf_accuracy_pct?.toFixed(1) || "0"}%
+          </Text>
           <View style={styles.accBarBg}>
-            <View style={[styles.accBarFill, { width: `${Math.min(100, bt.within_1sigma_band_pct)}%`, backgroundColor: bandColor }]} />
+            <View style={[styles.accBarFill, { width: `${Math.min(100, bt.high_conf_accuracy_pct || 0)}%`, backgroundColor: hcAccColor }]} />
           </View>
-          <Text style={styles.accSub}>1σ band</Text>
+          <Text style={styles.accSub}>{bt.high_conf_signals || 0} hc signals</Text>
         </View>
       </View>
 
       <View style={styles.miniStatsRow}>
         <MiniStat label="LONG ACC" value={`${bt.long_accuracy_pct.toFixed(0)}%`} color={colors.profit} />
         <MiniStat label="SHORT ACC" value={`${bt.short_accuracy_pct.toFixed(0)}%`} color={colors.loss} />
-        <MiniStat label="MAE" value={`${bt.mae_pct.toFixed(2)}%`} color={colors.textSecondary} />
+        <MiniStat label="IN-RANGE" value={`${bt.within_1sigma_band_pct.toFixed(0)}%`} color={bandColor} />
         <MiniStat label="VOL 5m" value={`${data.volatility_5m_pct.toFixed(2)}%`} color={colors.warning} />
       </View>
 
       <View style={styles.overallBox}>
         <Target color={colors.accent} size={11} />
         <Text style={styles.overallText}>
-          Overall ensemble accuracy: <Text style={[styles.overallPct, { color: accColor }]}>{data.overall_accuracy_pct.toFixed(1)}%</Text> across all horizons
+          Overall: <Text style={[styles.overallPct, { color: accColor }]}>{data.overall_accuracy_pct.toFixed(1)}%</Text>
+          {" · High-conf: "}
+          <Text style={[styles.overallPct, { color: hcAccColor }]}>{data.overall_high_conf_accuracy_pct?.toFixed(1) || "0"}%</Text>
         </Text>
       </View>
 
       <Text style={styles.disclaimer}>
-        ⚠ Walk-forward backtest on out-of-sample 5-min candles. Past performance ≠ future returns.
+        ⚠ Walk-forward backtest · Updates every minute · Past performance ≠ future returns
       </Text>
     </View>
   );
@@ -136,11 +230,20 @@ function MiniStat({ label, value, color }: { label: string; value: string; color
 const styles = StyleSheet.create({
   container: { marginHorizontal: 12, marginTop: 12, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 16 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: 8 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   title: { fontFamily: fonts.bodySemi, color: colors.accent, fontSize: 11, letterSpacing: 1.8 },
   interval: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10 },
+  refreshBtn: { padding: 4 },
   dirPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, borderWidth: 1 },
   dirPillText: { fontFamily: fonts.bodySemi, fontSize: 11, letterSpacing: 1 },
+  
+  modelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
+  modelBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.accent + "15", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  modelText: { fontFamily: fonts.mono, color: colors.accent, fontSize: 9 },
+  autoRefreshBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: colors.border },
+  autoRefreshText: { fontFamily: fonts.mono, fontSize: 9 },
+  
   asOf: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 10, marginTop: 6 },
 
   tabRow: { flexDirection: "row", gap: 6, marginTop: 14, marginBottom: 6 },
@@ -153,9 +256,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between" },
   col: { flex: 1 },
   label: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 9, letterSpacing: 1 },
-  bigVal: { fontFamily: fonts.monoBold, fontSize: 22, marginTop: 4 },
+  bigVal: { fontFamily: fonts.monoBold, fontSize: 20, marginTop: 4 },
+  confVal: { fontFamily: fonts.bodySemi, fontSize: 14, marginTop: 4 },
   changeText: { fontFamily: fonts.mono, fontSize: 11, marginTop: 2 },
   subText: { fontFamily: fonts.bodyMed, color: colors.textSecondary, fontSize: 11, marginTop: 2 },
+  scoreText: { fontFamily: fonts.mono, color: colors.textMuted, fontSize: 9, marginTop: 2 },
   rangeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
   rangeLabel: { fontFamily: fonts.body, color: colors.textMuted, fontSize: 9, letterSpacing: 1 },
   rangeVal: { fontFamily: fonts.mono, color: colors.textSecondary, fontSize: 11 },

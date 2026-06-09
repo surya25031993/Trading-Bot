@@ -197,7 +197,13 @@ export default function Options() {
             {prediction && <PredictionCard data={prediction} />}
 
             {/* === INTRADAY 5/10/15/30-min FORECAST + BACKTEST === */}
-            {intraday && <IntradayPredictionCard data={intraday} />}
+            {intraday && (
+              <IntradayPredictionCard 
+                data={intraday} 
+                symbol={index === "NIFTY" ? "^NSEI" : index === "SENSEX" ? "^BSESN" : "^NSEBANK"} 
+                onRefresh={setIntraday} 
+              />
+            )}
 
             {/* Strategy recommendation */}
             <View style={styles.card} testID="strategy-card">

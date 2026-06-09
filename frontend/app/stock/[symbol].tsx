@@ -26,6 +26,7 @@ export default function StockDetail() {
   const [advChart, setAdvChart] = useState<ChartData | null>(null);
   const [ind, setInd] = useState<IndicatorData | null>(null);
   const [pred, setPred] = useState<Prediction | null>(null);
+  const [intra, setIntra] = useState<IntradayForecast | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [aiText, setAiText] = useState("");
@@ -164,7 +165,7 @@ export default function StockDetail() {
         {pred && <PredictionCard data={pred} />}
 
         {/* === INTRADAY 5/10/15/30-min FORECAST + BACKTEST === */}
-        {intra && <IntradayPredictionCard data={intra} />}
+        {intra && <IntradayPredictionCard data={intra} symbol={symbol} onRefresh={setIntra} />}
 
         {ind && (
           <View style={styles.card}>
