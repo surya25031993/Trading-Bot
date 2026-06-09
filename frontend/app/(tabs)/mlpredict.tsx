@@ -151,7 +151,17 @@ export default function MLPredictScreen() {
               </View>
             </View>
 
-            <Text style={styles.asOf}>As of {selected.as_of} · 60-day training data</Text>
+            <View style={styles.asOfRow}>
+              <Text style={styles.asOf}>As of {selected.as_of} · 60-day training data</Text>
+              {selected.cached && (
+                <View style={styles.cacheBadge}>
+                  <Zap color={colors.profit} size={10} />
+                  <Text style={styles.cacheText}>
+                    Cached ({Math.floor((selected.cache_ttl_seconds || 300) - (selected.cache_age_seconds || 0))}s)
+                  </Text>
+                </View>
+              )}
+            </View>
 
             {/* Accuracy Summary */}
             <View style={styles.accuracyRow}>
@@ -397,7 +407,10 @@ const styles = StyleSheet.create({
   mainPrice: { color: colors.textSecondary, fontFamily: fonts.mono, fontSize: 14, marginTop: 2 },
   directionBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
   directionText: { fontFamily: fonts.bodySemi, fontSize: 13 },
-  asOf: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 11, marginTop: 8 },
+  asOfRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 8 },
+  asOf: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 11 },
+  cacheBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.profit + "15", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  cacheText: { color: colors.profit, fontFamily: fonts.mono, fontSize: 9 },
 
   accuracyRow: { flexDirection: "row", gap: 10, marginTop: 16 },
   accuracyCard: { flex: 1, backgroundColor: colors.bg, borderRadius: 10, padding: 12, alignItems: "center" },

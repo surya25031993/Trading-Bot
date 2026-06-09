@@ -2003,195 +2003,259 @@ class MLPredictorV2:
 # Global ML predictor instance cache (per symbol)
 _ml_predictors: dict = {}
 
+# ML Prediction Result Cache - stores full prediction results with timestamp
+# Format: { symbol: { "result": {...}, "cached_at": datetime, "is_computing": bool } }
+_ml_prediction_cache: dict = {}
+_ml_cache_lock = asyncio.Lock()
+ML_CACHE_TTL_SECONDS = 300  # 5 minutes cache TTL
+
+
+async def _compute_ml_prediction(symbol: str) -> dict:
+    """
+    Internal function to compute ML prediction for a symbol.
+    This does the heavy lifting of fetching data, training models, and generating predictions.
+    """
+    # Fetch 60 days of 5-minute data for more training samples
+    df = await asyncio.to_thread(fetch_history, symbol, "60d", "5m")
+    if df.empty or len(df) < 500:
+        # Fallback to 30 days if 60 days not available
+        df = await asyncio.to_thread(fetch_history, symbol, "30d", "5m")
+    if df.empty or len(df) < 200:
+        raise HTTPException(status_code=400, detail="Insufficient data for ML prediction")
+    
+    # Compute indicators
+    votes = _compute_signal_votes(df, include_aggregate=True)
+    if votes.empty:
+        raise HTTPException(status_code=400, detail="Failed to compute indicators")
+    
+    # Initialize or get cached predictor
+    if symbol not in _ml_predictors:
+        _ml_predictors[symbol] = MLPredictorV2()
+    
+    predictor = _ml_predictors[symbol]
+    
+    # Horizons: 5, 10, 15, 30 minutes
+    horizons = [
+        {"label": "5 min", "bars": 1},
+        {"label": "10 min", "bars": 2},
+        {"label": "15 min", "bars": 3},
+        {"label": "30 min", "bars": 6},
+    ]
+    
+    results = []
+    overall_accuracy = []
+    
+    for h in horizons:
+        # Train model
+        train_result = predictor.train(votes, h["bars"])
+        
+        if "error" in train_result:
+            results.append({
+                "label": h["label"],
+                "bars": h["bars"],
+                "direction": "N/A",
+                "confidence": 0,
+                "reason": train_result["error"],
+                "training": train_result,
+                "backtest_accuracy": 0,
+            })
+            continue
+        
+        # Make prediction
+        pred = predictor.predict(votes, h["bars"])
+        
+        # Get validation accuracy from training
+        val_acc = train_result.get("validation_accuracy", {})
+        avg_acc = np.mean(list(val_acc.values())) * 100 if val_acc else 50
+        
+        # Get high-confidence backtest accuracy
+        hc_result = predictor.backtest_high_confidence(votes, h["bars"])
+        
+        direction_str = "UP" if pred["direction"] == 1 else "DOWN" if pred["direction"] == -1 else "NEUTRAL"
+        
+        results.append({
+            "label": h["label"],
+            "bars": h["bars"],
+            "direction": direction_str,
+            "confidence": pred["confidence"],
+            "reason": pred["reason"],
+            "model_votes": pred.get("model_votes", {}),
+            "probabilities": pred.get("probabilities", {}),
+            "avg_probability": pred.get("avg_probability", 0.5),
+            "is_high_confidence": bool(pred.get("is_high_confidence", False)),
+            "training": {
+                "samples": int(train_result.get("samples", 0)),
+                "train_samples": int(train_result.get("train_samples", 0)),
+                "val_samples": int(train_result.get("val_samples", 0)),
+                "best_model": str(train_result.get("best_model", "")),
+                "best_accuracy": float(train_result.get("best_accuracy", 0.5)),
+            },
+            "backtest_accuracy": round(float(train_result.get("best_accuracy", 0.5)) * 100, 1),
+            "high_conf_accuracy": float(hc_result.get("accuracy", 0)),
+            "high_conf_signals": int(hc_result.get("signals", 0)),
+            "model_accuracies": {k: round(float(v) * 100, 1) for k, v in val_acc.items()} if val_acc else {},
+        })
+        
+        best_acc = train_result.get("best_accuracy", 0.5) * 100
+        if best_acc > 0:
+            overall_accuracy.append(best_acc)
+    
+    # Current price and timestamp
+    spot = float(df["Close"].iloc[-1])
+    last_ts = df.index[-1]
+    last_ts_str = last_ts.strftime("%Y-%m-%d %H:%M") if hasattr(last_ts, "strftime") else str(last_ts)
+    
+    # Overall direction from ML
+    up_votes = sum(1 for r in results if r["direction"] == "UP")
+    down_votes = sum(1 for r in results if r["direction"] == "DOWN")
+    
+    if up_votes > down_votes:
+        ml_direction = "BULLISH"
+    elif down_votes > up_votes:
+        ml_direction = "BEARISH"
+    else:
+        ml_direction = "NEUTRAL"
+    
+    # Calculate Entry/Exit Points based on ML prediction
+    # Use ATR for dynamic stop-loss and target calculation
+    atr = 0
+    if len(df) >= 14:
+        high = df["High"].tail(14)
+        low = df["Low"].tail(14)
+        close_prev = df["Close"].shift(1).tail(14)
+        tr = pd.concat([
+            high - low,
+            (high - close_prev).abs(),
+            (low - close_prev).abs()
+        ], axis=1).max(axis=1)
+        atr = float(tr.mean())
+    
+    atr_pct = (atr / spot * 100) if spot > 0 else 0.5
+    
+    # Entry and Exit calculation
+    entry_exit = None
+    if ml_direction != "NEUTRAL":
+        # Use 1.5x ATR for stop-loss, 2x ATR for target (1.33:1 R:R ratio)
+        # For high confidence, use tighter stops
+        is_high_conf = any(r.get("is_high_confidence", False) for r in results)
+        sl_multiplier = 1.2 if is_high_conf else 1.5
+        target_multiplier = 2.0 if is_high_conf else 2.5
+        
+        if ml_direction == "BULLISH":
+            entry_price = spot
+            stop_loss = round(spot - (atr * sl_multiplier), 2)
+            target_1 = round(spot + (atr * target_multiplier), 2)
+            target_2 = round(spot + (atr * target_multiplier * 1.5), 2)
+            trade_type = "LONG"
+        else:  # BEARISH
+            entry_price = spot
+            stop_loss = round(spot + (atr * sl_multiplier), 2)
+            target_1 = round(spot - (atr * target_multiplier), 2)
+            target_2 = round(spot - (atr * target_multiplier * 1.5), 2)
+            trade_type = "SHORT"
+        
+        # Calculate risk-reward ratio
+        risk = abs(entry_price - stop_loss)
+        reward = abs(target_1 - entry_price)
+        rr_ratio = round(reward / risk, 2) if risk > 0 else 0
+        
+        # Calculate percentage moves
+        sl_pct = round(abs(entry_price - stop_loss) / entry_price * 100, 2)
+        t1_pct = round(abs(target_1 - entry_price) / entry_price * 100, 2)
+        t2_pct = round(abs(target_2 - entry_price) / entry_price * 100, 2)
+        
+        entry_exit = {
+            "trade_type": trade_type,
+            "entry_price": round(float(entry_price), 2),
+            "stop_loss": round(float(stop_loss), 2),
+            "stop_loss_pct": float(sl_pct),
+            "target_1": round(float(target_1), 2),
+            "target_1_pct": float(t1_pct),
+            "target_2": round(float(target_2), 2),
+            "target_2_pct": float(t2_pct),
+            "risk_reward": float(rr_ratio),
+            "atr": round(float(atr), 2),
+            "atr_pct": round(float(atr_pct), 2),
+            "is_high_confidence": bool(is_high_conf),
+            "suggested_qty_pct": 5 if is_high_conf else 3,
+            "timeframe": "Intraday (5-30 min)",
+        }
+    
+    return {
+        "symbol": symbol,
+        "model_type": "ML Ensemble (XGBoost + RandomForest + GradientBoosting)",
+        "current_price": round(spot, 2),
+        "as_of": last_ts_str,
+        "ml_direction": ml_direction,
+        "predictions": results,
+        "overall_ml_accuracy": round(np.mean(overall_accuracy), 1) if overall_accuracy else 0,
+        "entry_exit": entry_exit,
+        "note": "ML predictions are trained on recent 5-day data with walk-forward validation",
+        "cached": False,
+    }
+
 
 @api_router.get("/stocks/{symbol}/ml-predict")
-async def stock_ml_prediction(symbol: str):
+async def stock_ml_prediction(symbol: str, force_refresh: bool = False):
     """
-    ML-BASED PREDICTION ENDPOINT V2 - Extended Training Data
+    ML-BASED PREDICTION ENDPOINT V2 - With 5-Minute Caching
     
     Uses ensemble of XGBoost, Random Forest, and Gradient Boosting models
     trained on 60 days of indicator signals to predict price direction.
     
     Returns predictions for 5, 10, 15, 30 minute horizons with backtest accuracy.
+    
+    Caching: Results are cached for 5 minutes to improve response time.
+    Use force_refresh=true to bypass cache.
     """
     try:
-        # Fetch 60 days of 5-minute data for more training samples
-        df = await asyncio.to_thread(fetch_history, symbol, "60d", "5m")
-        if df.empty or len(df) < 500:
-            # Fallback to 30 days if 60 days not available
-            df = await asyncio.to_thread(fetch_history, symbol, "30d", "5m")
-        if df.empty or len(df) < 200:
-            raise HTTPException(status_code=400, detail="Insufficient data for ML prediction")
+        now = datetime.now()
         
-        # Compute indicators
-        votes = _compute_signal_votes(df, include_aggregate=True)
-        if votes.empty:
-            raise HTTPException(status_code=400, detail="Failed to compute indicators")
-        
-        # Initialize or get cached predictor
-        if symbol not in _ml_predictors:
-            _ml_predictors[symbol] = MLPredictorV2()  # Use enhanced predictor
-        
-        predictor = _ml_predictors[symbol]
-        
-        # Horizons: 5, 10, 15, 30 minutes
-        horizons = [
-            {"label": "5 min", "bars": 1},
-            {"label": "10 min", "bars": 2},
-            {"label": "15 min", "bars": 3},
-            {"label": "30 min", "bars": 6},
-        ]
-        
-        results = []
-        overall_accuracy = []
-        
-        for h in horizons:
-            # Train model
-            train_result = predictor.train(votes, h["bars"])
+        # Check if we have a valid cached result
+        async with _ml_cache_lock:
+            if symbol in _ml_prediction_cache and not force_refresh:
+                cached = _ml_prediction_cache[symbol]
+                cache_age = (now - cached["cached_at"]).total_seconds()
+                
+                # Return cached result if within TTL
+                if cache_age < ML_CACHE_TTL_SECONDS and cached.get("result"):
+                    result = cached["result"].copy()
+                    result["cached"] = True
+                    result["cache_age_seconds"] = int(cache_age)
+                    result["cache_ttl_seconds"] = ML_CACHE_TTL_SECONDS
+                    logger.info(f"ML prediction for {symbol} served from cache (age: {cache_age:.0f}s)")
+                    return result
+                
+                # If cache is stale but computation is in progress, return stale data
+                if cached.get("is_computing") and cached.get("result"):
+                    result = cached["result"].copy()
+                    result["cached"] = True
+                    result["cache_age_seconds"] = int(cache_age)
+                    result["cache_ttl_seconds"] = ML_CACHE_TTL_SECONDS
+                    result["note"] = "Refreshing in background..."
+                    return result
             
-            if "error" in train_result:
-                results.append({
-                    "label": h["label"],
-                    "bars": h["bars"],
-                    "direction": "N/A",
-                    "confidence": 0,
-                    "reason": train_result["error"],
-                    "training": train_result,
-                    "backtest_accuracy": 0,
-                })
-                continue
-            
-            # Make prediction
-            pred = predictor.predict(votes, h["bars"])
-            
-            # Get validation accuracy from training
-            val_acc = train_result.get("validation_accuracy", {})
-            avg_acc = np.mean(list(val_acc.values())) * 100 if val_acc else 50
-            
-            # Get high-confidence backtest accuracy
-            hc_result = predictor.backtest_high_confidence(votes, h["bars"])
-            
-            direction_str = "UP" if pred["direction"] == 1 else "DOWN" if pred["direction"] == -1 else "NEUTRAL"
-            
-            results.append({
-                "label": h["label"],
-                "bars": h["bars"],
-                "direction": direction_str,
-                "confidence": pred["confidence"],
-                "reason": pred["reason"],
-                "model_votes": pred.get("model_votes", {}),
-                "probabilities": pred.get("probabilities", {}),
-                "avg_probability": pred.get("avg_probability", 0.5),
-                "is_high_confidence": bool(pred.get("is_high_confidence", False)),
-                "training": {
-                    "samples": int(train_result.get("samples", 0)),
-                    "train_samples": int(train_result.get("train_samples", 0)),
-                    "val_samples": int(train_result.get("val_samples", 0)),
-                    "best_model": str(train_result.get("best_model", "")),
-                    "best_accuracy": float(train_result.get("best_accuracy", 0.5)),
-                },
-                "backtest_accuracy": round(float(train_result.get("best_accuracy", 0.5)) * 100, 1),
-                "high_conf_accuracy": float(hc_result.get("accuracy", 0)),
-                "high_conf_signals": int(hc_result.get("signals", 0)),
-                "model_accuracies": {k: round(float(v) * 100, 1) for k, v in val_acc.items()} if val_acc else {},
-            })
-            
-            best_acc = train_result.get("best_accuracy", 0.5) * 100
-            if best_acc > 0:
-                overall_accuracy.append(best_acc)
+            # Mark as computing to prevent duplicate computations
+            if symbol not in _ml_prediction_cache:
+                _ml_prediction_cache[symbol] = {"result": None, "cached_at": now, "is_computing": True}
+            else:
+                _ml_prediction_cache[symbol]["is_computing"] = True
         
-        # Current price and timestamp
-        spot = float(df["Close"].iloc[-1])
-        last_ts = df.index[-1]
-        last_ts_str = last_ts.strftime("%Y-%m-%d %H:%M") if hasattr(last_ts, "strftime") else str(last_ts)
+        # Compute fresh prediction
+        logger.info(f"Computing fresh ML prediction for {symbol}...")
+        result = await _compute_ml_prediction(symbol)
         
-        # Overall direction from ML
-        up_votes = sum(1 for r in results if r["direction"] == "UP")
-        down_votes = sum(1 for r in results if r["direction"] == "DOWN")
-        
-        if up_votes > down_votes:
-            ml_direction = "BULLISH"
-        elif down_votes > up_votes:
-            ml_direction = "BEARISH"
-        else:
-            ml_direction = "NEUTRAL"
-        
-        # Calculate Entry/Exit Points based on ML prediction
-        # Use ATR for dynamic stop-loss and target calculation
-        atr = 0
-        if len(df) >= 14:
-            high = df["High"].tail(14)
-            low = df["Low"].tail(14)
-            close_prev = df["Close"].shift(1).tail(14)
-            tr = pd.concat([
-                high - low,
-                (high - close_prev).abs(),
-                (low - close_prev).abs()
-            ], axis=1).max(axis=1)
-            atr = float(tr.mean())
-        
-        atr_pct = (atr / spot * 100) if spot > 0 else 0.5
-        
-        # Entry and Exit calculation
-        entry_exit = None
-        if ml_direction != "NEUTRAL":
-            # Use 1.5x ATR for stop-loss, 2x ATR for target (1.33:1 R:R ratio)
-            # For high confidence, use tighter stops
-            is_high_conf = any(r.get("is_high_confidence", False) for r in results)
-            sl_multiplier = 1.2 if is_high_conf else 1.5
-            target_multiplier = 2.0 if is_high_conf else 2.5
-            
-            if ml_direction == "BULLISH":
-                entry_price = spot
-                stop_loss = round(spot - (atr * sl_multiplier), 2)
-                target_1 = round(spot + (atr * target_multiplier), 2)
-                target_2 = round(spot + (atr * target_multiplier * 1.5), 2)
-                trade_type = "LONG"
-            else:  # BEARISH
-                entry_price = spot
-                stop_loss = round(spot + (atr * sl_multiplier), 2)
-                target_1 = round(spot - (atr * target_multiplier), 2)
-                target_2 = round(spot - (atr * target_multiplier * 1.5), 2)
-                trade_type = "SHORT"
-            
-            # Calculate risk-reward ratio
-            risk = abs(entry_price - stop_loss)
-            reward = abs(target_1 - entry_price)
-            rr_ratio = round(reward / risk, 2) if risk > 0 else 0
-            
-            # Calculate percentage moves
-            sl_pct = round(abs(entry_price - stop_loss) / entry_price * 100, 2)
-            t1_pct = round(abs(target_1 - entry_price) / entry_price * 100, 2)
-            t2_pct = round(abs(target_2 - entry_price) / entry_price * 100, 2)
-            
-            entry_exit = {
-                "trade_type": trade_type,
-                "entry_price": round(float(entry_price), 2),
-                "stop_loss": round(float(stop_loss), 2),
-                "stop_loss_pct": float(sl_pct),
-                "target_1": round(float(target_1), 2),
-                "target_1_pct": float(t1_pct),
-                "target_2": round(float(target_2), 2),
-                "target_2_pct": float(t2_pct),
-                "risk_reward": float(rr_ratio),
-                "atr": round(float(atr), 2),
-                "atr_pct": round(float(atr_pct), 2),
-                "is_high_confidence": bool(is_high_conf),
-                "suggested_qty_pct": 5 if is_high_conf else 3,  # % of capital
-                "timeframe": "Intraday (5-30 min)",
+        # Cache the result
+        async with _ml_cache_lock:
+            _ml_prediction_cache[symbol] = {
+                "result": result,
+                "cached_at": datetime.now(),
+                "is_computing": False
             }
         
-        return {
-            "symbol": symbol,
-            "model_type": "ML Ensemble (XGBoost + RandomForest + GradientBoosting)",
-            "current_price": round(spot, 2),
-            "as_of": last_ts_str,
-            "ml_direction": ml_direction,
-            "predictions": results,
-            "overall_ml_accuracy": round(np.mean(overall_accuracy), 1) if overall_accuracy else 0,
-            "entry_exit": entry_exit,
-            "note": "ML predictions are trained on recent 5-day data with walk-forward validation",
-        }
+        result["cached"] = False
+        result["cache_ttl_seconds"] = ML_CACHE_TTL_SECONDS
+        return result
         
     except HTTPException:
         raise

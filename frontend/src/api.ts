@@ -229,4 +229,7 @@ export type MLPrediction = {
   overall_ml_accuracy: number;
   entry_exit?: MLEntryExit;
   note: string;
+  cached?: boolean;
+  cache_age_seconds?: number;
+  cache_ttl_seconds?: number;
 };
