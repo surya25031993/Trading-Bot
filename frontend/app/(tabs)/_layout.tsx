@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Home, Star, TrendingUp, Briefcase, Layers, Bot } from "lucide-react-native";
+import { Home, Star, TrendingUp, Briefcase, Layers, Bot, Brain } from "lucide-react-native";
 import { colors, fonts } from "@/src/theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Platform } from "react-native";
@@ -20,22 +20,30 @@ export default function TabsLayout() {
           paddingBottom: insets.bottom + (Platform.OS === "ios" ? 0 : 6),
           paddingTop: 6,
         },
-        tabBarLabelStyle: { fontFamily: fonts.bodyMed, fontSize: 11 },
+        tabBarLabelStyle: { fontFamily: fonts.bodyMed, fontSize: 10 },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Market",
-          tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Home color={color} size={size - 2} />,
           tabBarTestID: "tab-market",
+        }}
+      />
+      <Tabs.Screen
+        name="mlpredict"
+        options={{
+          title: "ML Predict",
+          tabBarIcon: ({ color, size }) => <Brain color={color} size={size - 2} />,
+          tabBarTestID: "tab-mlpredict",
         }}
       />
       <Tabs.Screen
         name="signals"
         options={{
           title: "Signals",
-          tabBarIcon: ({ color, size }) => <TrendingUp color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <TrendingUp color={color} size={size - 2} />,
           tabBarTestID: "tab-signals",
         }}
       />
@@ -43,7 +51,7 @@ export default function TabsLayout() {
         name="options"
         options={{
           title: "Options",
-          tabBarIcon: ({ color, size }) => <Layers color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Layers color={color} size={size - 2} />,
           tabBarTestID: "tab-options",
         }}
       />
@@ -51,7 +59,7 @@ export default function TabsLayout() {
         name="watchlist"
         options={{
           title: "Watchlist",
-          tabBarIcon: ({ color, size }) => <Star color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Star color={color} size={size - 2} />,
           tabBarTestID: "tab-watchlist",
         }}
       />
@@ -59,7 +67,7 @@ export default function TabsLayout() {
         name="portfolio"
         options={{
           title: "Portfolio",
-          tabBarIcon: ({ color, size }) => <Briefcase color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Briefcase color={color} size={size - 2} />,
           tabBarTestID: "tab-portfolio",
         }}
       />
@@ -67,7 +75,7 @@ export default function TabsLayout() {
         name="history"
         options={{
           title: "Bot",
-          tabBarIcon: ({ color, size }) => <Bot color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Bot color={color} size={size - 2} />,
           tabBarTestID: "tab-bot",
         }}
       />
