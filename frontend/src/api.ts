@@ -237,6 +237,43 @@ export type MLEntryExit = {
   trailing_stop?: TrailingStop;
 };
 
+export type OptionLeg = {
+  action: string;
+  type: string;
+  strike: number;
+  premium: number;
+  qty: number;
+};
+
+export type OptionRiskManagement = {
+  entry: string;
+  stop_loss: string;
+  target_1: string;
+  target_2: string;
+  max_risk: string;
+};
+
+export type OptionSuggestionML = {
+  index: string;
+  direction: string;
+  option_type: string;
+  strike: number;
+  lot_size: number;
+  premium_estimate: number;
+  total_premium: number;
+  stop_loss_premium: number;
+  target_1_premium: number;
+  target_2_premium: number;
+  max_loss: number;
+  breakeven: number;
+  strategy: string;
+  strategy_note: string;
+  legs: OptionLeg[];
+  risk_management: OptionRiskManagement;
+  confidence: string;
+  expiry_note: string;
+};
+
 export type MLPrediction = {
   symbol: string;
   model_type: string;
@@ -246,6 +283,7 @@ export type MLPrediction = {
   predictions: MLPredictionItem[];
   overall_ml_accuracy: number;
   entry_exit?: MLEntryExit;
+  option_suggestion?: OptionSuggestionML;
   note: string;
   cached?: boolean;
   cache_age_seconds?: number;

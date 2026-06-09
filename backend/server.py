@@ -2218,6 +2218,111 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             "trailing_stop": trailing_stop,
         }
     
+    # Option Suggestions based on ML prediction
+    option_suggestion = None
+    
+    # Determine if this is an index (options tradeable)
+    index_map = {
+        "^NSEI": {"name": "NIFTY", "lot_size": 75, "strike_gap": 50},
+        "^NSEBANK": {"name": "BANKNIFTY", "lot_size": 35, "strike_gap": 100},
+        "^BSESN": {"name": "SENSEX", "lot_size": 20, "strike_gap": 100},
+    }
+    
+    if symbol in index_map and ml_direction != "NEUTRAL":
+        idx_info = index_map[symbol]
+        strike_gap = idx_info["strike_gap"]
+        lot_size = idx_info["lot_size"]
+        
+        # Calculate ATM strike (rounded to nearest strike gap)
+        atm_strike = round(spot / strike_gap) * strike_gap
+        
+        # Estimate IV and days to expiry for premium calculation
+        iv = 0.15  # 15% implied volatility estimate
+        days_to_expiry = 5  # Assume weekly expiry
+        T = days_to_expiry / 365
+        r = 0.07  # Risk-free rate
+        
+        if ml_direction == "BULLISH":
+            # Suggest buying Call option
+            opt_type = "CE"
+            strike = atm_strike  # ATM Call
+            otm_strike = atm_strike + strike_gap  # Slightly OTM for spread
+            
+            # Estimate premium using Black-Scholes approximation
+            d1 = (np.log(spot / strike) + (r + 0.5 * iv ** 2) * T) / (iv * np.sqrt(T)) if T > 0 else 0
+            d2 = d1 - iv * np.sqrt(T) if T > 0 else 0
+            from scipy.stats import norm
+            premium_est = spot * norm.cdf(d1) - strike * np.exp(-r * T) * norm.cdf(d2) if T > 0 else max(0, spot - strike)
+            premium_est = round(premium_est, 2)
+            
+            # Stop loss at 50% of premium, target at 100% profit
+            option_sl = round(premium_est * 0.5, 2)
+            option_t1 = round(premium_est * 2, 2)  # 100% profit
+            option_t2 = round(premium_est * 3, 2)  # 200% profit
+            
+            strategy = "Long Call" if is_high_conf else "Bull Call Spread"
+            strategy_note = "Buy ATM Call for directional play" if is_high_conf else "Buy ATM Call + Sell OTM Call for limited risk"
+            
+        else:  # BEARISH
+            # Suggest buying Put option
+            opt_type = "PE"
+            strike = atm_strike  # ATM Put
+            otm_strike = atm_strike - strike_gap  # Slightly OTM for spread
+            
+            # Estimate premium using Black-Scholes approximation
+            d1 = (np.log(spot / strike) + (r + 0.5 * iv ** 2) * T) / (iv * np.sqrt(T)) if T > 0 else 0
+            d2 = d1 - iv * np.sqrt(T) if T > 0 else 0
+            from scipy.stats import norm
+            premium_est = strike * np.exp(-r * T) * norm.cdf(-d2) - spot * norm.cdf(-d1) if T > 0 else max(0, strike - spot)
+            premium_est = round(premium_est, 2)
+            
+            # Stop loss at 50% of premium, target at 100% profit
+            option_sl = round(premium_est * 0.5, 2)
+            option_t1 = round(premium_est * 2, 2)  # 100% profit
+            option_t2 = round(premium_est * 3, 2)  # 200% profit
+            
+            strategy = "Long Put" if is_high_conf else "Bear Put Spread"
+            strategy_note = "Buy ATM Put for directional play" if is_high_conf else "Buy ATM Put + Sell OTM Put for limited risk"
+        
+        # Calculate max loss and breakeven
+        max_loss = premium_est * lot_size
+        breakeven = strike + premium_est if opt_type == "CE" else strike - premium_est
+        
+        option_suggestion = {
+            "index": idx_info["name"],
+            "direction": ml_direction,
+            "option_type": opt_type,
+            "strike": int(atm_strike),
+            "lot_size": lot_size,
+            "premium_estimate": float(premium_est),
+            "total_premium": round(float(premium_est * lot_size), 2),
+            "stop_loss_premium": float(option_sl),
+            "target_1_premium": float(option_t1),
+            "target_2_premium": float(option_t2),
+            "max_loss": round(float(max_loss), 2),
+            "breakeven": round(float(breakeven), 2),
+            "strategy": strategy,
+            "strategy_note": strategy_note,
+            "legs": [
+                {
+                    "action": "BUY",
+                    "type": opt_type,
+                    "strike": int(atm_strike),
+                    "premium": float(premium_est),
+                    "qty": 1,
+                }
+            ],
+            "risk_management": {
+                "entry": f"Buy {idx_info['name']} {int(atm_strike)} {opt_type} @ ₹{premium_est}",
+                "stop_loss": f"Exit if premium falls to ₹{option_sl} (50% loss)",
+                "target_1": f"Book 50% at ₹{option_t1} (100% profit)",
+                "target_2": f"Trail remaining to ₹{option_t2} (200% profit)",
+                "max_risk": f"₹{max_loss:,.0f} ({lot_size} lot × ₹{premium_est})",
+            },
+            "confidence": "HIGH" if is_high_conf else "MODERATE",
+            "expiry_note": "Weekly expiry recommended for intraday/short-term",
+        }
+    
     return {
         "symbol": symbol,
         "model_type": "ML Ensemble (XGBoost + RandomForest + GradientBoosting)",
@@ -2227,6 +2332,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         "predictions": results,
         "overall_ml_accuracy": round(np.mean(overall_accuracy), 1) if overall_accuracy else 0,
         "entry_exit": entry_exit,
+        "option_suggestion": option_suggestion,
         "note": "ML predictions are trained on recent 5-day data with walk-forward validation",
         "cached": False,
     }

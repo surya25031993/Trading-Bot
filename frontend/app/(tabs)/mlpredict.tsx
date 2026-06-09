@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, fonts } from "@/src/theme";
 import { api, MLPrediction } from "@/src/api";
-import { Brain, TrendingUp, TrendingDown, Minus, RefreshCw, Target, Zap, BarChart2, ArrowDownToLine, ArrowUpFromLine, ShieldAlert, Crosshair, DollarSign } from "lucide-react-native";
+import { Brain, TrendingUp, TrendingDown, Minus, RefreshCw, Target, Zap, BarChart2, ArrowDownToLine, ArrowUpFromLine, ShieldAlert, Crosshair, DollarSign, Activity, AlertTriangle } from "lucide-react-native";
 
 const SYMBOLS = [
   { symbol: "^NSEI", name: "NIFTY 50" },
@@ -377,6 +377,112 @@ export default function MLPredictScreen() {
           </View>
         )}
 
+        {/* Option Suggestion Card */}
+        {selected?.option_suggestion && (
+          <View style={[styles.optionCard, { 
+            borderColor: selected.option_suggestion.option_type === "CE" ? colors.profit + "66" : colors.loss + "66" 
+          }]}>
+            <View style={styles.optHeader}>
+              <View style={styles.optHeaderLeft}>
+                <Activity color={selected.option_suggestion.option_type === "CE" ? colors.profit : colors.loss} size={20} />
+                <View>
+                  <Text style={styles.optTitle}>OPTION SUGGESTION</Text>
+                  <Text style={styles.optSubtitle}>{selected.option_suggestion.strategy}</Text>
+                </View>
+              </View>
+              <View style={[styles.optTypeBadge, { 
+                backgroundColor: selected.option_suggestion.option_type === "CE" ? colors.profit + "22" : colors.loss + "22" 
+              }]}>
+                <Text style={[styles.optTypeText, { 
+                  color: selected.option_suggestion.option_type === "CE" ? colors.profit : colors.loss 
+                }]}>
+                  {selected.option_suggestion.option_type}
+                </Text>
+              </View>
+            </View>
+
+            {/* Option Details */}
+            <View style={styles.optMainRow}>
+              <View style={styles.optMainCol}>
+                <Text style={styles.optMainLabel}>CONTRACT</Text>
+                <Text style={styles.optMainValue}>
+                  {selected.option_suggestion.index} {selected.option_suggestion.strike} {selected.option_suggestion.option_type}
+                </Text>
+              </View>
+              <View style={styles.optMainCol}>
+                <Text style={styles.optMainLabel}>PREMIUM</Text>
+                <Text style={styles.optMainValue}>₹{selected.option_suggestion.premium_estimate}</Text>
+              </View>
+              <View style={styles.optMainCol}>
+                <Text style={styles.optMainLabel}>LOT SIZE</Text>
+                <Text style={styles.optMainValue}>{selected.option_suggestion.lot_size}</Text>
+              </View>
+            </View>
+
+            {/* Risk Management */}
+            <View style={styles.optRiskSection}>
+              <Text style={styles.optRiskTitle}>RISK MANAGEMENT</Text>
+              
+              <View style={styles.optRiskItem}>
+                <View style={[styles.optRiskDot, { backgroundColor: colors.accent }]} />
+                <Text style={styles.optRiskText}>{selected.option_suggestion.risk_management.entry}</Text>
+              </View>
+              
+              <View style={styles.optRiskItem}>
+                <View style={[styles.optRiskDot, { backgroundColor: colors.loss }]} />
+                <Text style={[styles.optRiskText, { color: colors.loss }]}>
+                  {selected.option_suggestion.risk_management.stop_loss}
+                </Text>
+              </View>
+              
+              <View style={styles.optRiskItem}>
+                <View style={[styles.optRiskDot, { backgroundColor: colors.profit }]} />
+                <Text style={[styles.optRiskText, { color: colors.profit }]}>
+                  {selected.option_suggestion.risk_management.target_1}
+                </Text>
+              </View>
+              
+              <View style={styles.optRiskItem}>
+                <View style={[styles.optRiskDot, { backgroundColor: colors.profit }]} />
+                <Text style={[styles.optRiskText, { color: colors.profit }]}>
+                  {selected.option_suggestion.risk_management.target_2}
+                </Text>
+              </View>
+            </View>
+
+            {/* Summary Row */}
+            <View style={styles.optSummaryRow}>
+              <View style={styles.optSummaryItem}>
+                <Text style={styles.optSummaryLabel}>MAX RISK</Text>
+                <Text style={[styles.optSummaryValue, { color: colors.loss }]}>
+                  ₹{selected.option_suggestion.max_loss.toLocaleString("en-IN")}
+                </Text>
+              </View>
+              <View style={styles.optSummaryItem}>
+                <Text style={styles.optSummaryLabel}>BREAKEVEN</Text>
+                <Text style={styles.optSummaryValue}>
+                  ₹{selected.option_suggestion.breakeven.toLocaleString("en-IN")}
+                </Text>
+              </View>
+              <View style={[styles.optSummaryItem, { 
+                backgroundColor: selected.option_suggestion.confidence === "HIGH" ? colors.profit + "15" : colors.warning + "15" 
+              }]}>
+                <Text style={styles.optSummaryLabel}>CONFIDENCE</Text>
+                <Text style={[styles.optSummaryValue, { 
+                  color: selected.option_suggestion.confidence === "HIGH" ? colors.profit : colors.warning 
+                }]}>
+                  {selected.option_suggestion.confidence}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.optNote}>
+              <AlertTriangle color={colors.warning} size={12} />
+              <Text style={styles.optNoteText}>{selected.option_suggestion.expiry_note}</Text>
+            </View>
+          </View>
+        )}
+
         {/* All Predictions Summary */}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle}>All Symbols Summary</Text>
@@ -718,5 +824,135 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 11,
     marginTop: 2,
+  },
+
+  // Option Suggestion Styles
+  optionCard: {
+    margin: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 2,
+  },
+  optHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 12,
+  },
+  optHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  optTitle: {
+    color: colors.text,
+    fontFamily: fonts.headingSemi,
+    fontSize: 12,
+    letterSpacing: 1,
+  },
+  optSubtitle: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  optTypeBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  optTypeText: {
+    fontFamily: fonts.monoBold,
+    fontSize: 14,
+    letterSpacing: 1,
+  },
+  optMainRow: {
+    flexDirection: "row",
+    backgroundColor: colors.bg,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+  },
+  optMainCol: {
+    flex: 1,
+    alignItems: "center",
+  },
+  optMainLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 9,
+    letterSpacing: 0.5,
+  },
+  optMainValue: {
+    color: colors.text,
+    fontFamily: fonts.monoBold,
+    fontSize: 14,
+    marginTop: 4,
+  },
+  optRiskSection: {
+    marginBottom: 12,
+  },
+  optRiskTitle: {
+    color: colors.textSecondary,
+    fontFamily: fonts.bodySemi,
+    fontSize: 10,
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  optRiskItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 6,
+  },
+  optRiskDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  optRiskText: {
+    color: colors.text,
+    fontFamily: fonts.body,
+    fontSize: 11,
+    flex: 1,
+  },
+  optSummaryRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  optSummaryItem: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderRadius: 8,
+    padding: 10,
+    alignItems: "center",
+  },
+  optSummaryLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 8,
+    letterSpacing: 0.5,
+  },
+  optSummaryValue: {
+    color: colors.text,
+    fontFamily: fonts.monoBold,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  optNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  optNoteText: {
+    color: colors.warning,
+    fontFamily: fonts.body,
+    fontSize: 10,
+    fontStyle: "italic",
   },
 });
