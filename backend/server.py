@@ -2921,15 +2921,52 @@ async def options_suggest(index: str = "NIFTY"):
     spot = q["price"]
     step = 100 if index.upper() in ("BANKNIFTY", "SENSEX") else 50
     atm = round(spot / step) * step
+
+    # Try to fetch the live Fyers option chain so we can use REAL premiums instead of BS estimates.
+    live_chain_map: dict = {}
+    chain_expiry = ""
+    try:
+        fyers_client2 = await fyers_int.get_client(db)
+        if fyers_client2:
+            # Get enough strikes to cover offsets used by strategies (max ~±400)
+            chain_data = await asyncio.to_thread(
+                fyers_int.fetch_option_chain_sync, fyers_client2, index.upper(), 12
+            )
+            if chain_data.get("available"):
+                chain_expiry = chain_data.get("expiry", "")
+                for row in chain_data.get("chain", []):
+                    live_chain_map[(row["strike"], "CE")] = {
+                        "ltp": row.get("ce_ltp"),
+                        "symbol": row.get("ce_symbol"),
+                    }
+                    live_chain_map[(row["strike"], "PE")] = {
+                        "ltp": row.get("pe_ltp"),
+                        "symbol": row.get("pe_symbol"),
+                    }
+    except Exception as e:
+        logger.warning(f"Fyers chain lookup for premiums failed: {e}")
+
     concrete_legs = []
+    used_live_premiums = False
     for leg in strat["legs"]:
         strike = atm + leg["strike_offset"]
-        # Estimate premium via Black-Scholes with ~15% IV, 7 days to expiry
-        T = 7 / 365.0
-        prem = bs_price(spot, strike, T, 0.07, 0.15, leg["type"])
+        live = live_chain_map.get((strike, leg["type"]))
+        if live and live.get("ltp") is not None and float(live["ltp"]) > 0:
+            prem = float(live["ltp"])
+            used_live_premiums = True
+            premium_source = "fyers"
+            fy_symbol = live.get("symbol", "")
+        else:
+            # Fallback: Black-Scholes with ~15% IV, 7 days to expiry
+            T = 7 / 365.0
+            prem = bs_price(spot, strike, T, 0.07, 0.15, leg["type"])
+            premium_source = "bs_estimate"
+            fy_symbol = ""
         concrete_legs.append({
             "side": leg["side"], "type": leg["type"], "strike": strike,
             "premium_est": round(prem, 2), "qty": leg["qty"],
+            "premium_source": premium_source,
+            "fyers_symbol": fy_symbol,
         })
     return {
         "index": index.upper(),
@@ -2940,9 +2977,14 @@ async def options_suggest(index: str = "NIFTY"):
         "rsi": ind["indicators"]["rsi"],
         "change_pct": q["change_pct"],
         "live_source": live_source,
+        "expiry": chain_expiry,
+        "premiums_live": used_live_premiums,
         "strategy": strat,
         "concrete_legs": concrete_legs,
-        "note": "Premium estimates use Black-Scholes (15% IV, weekly expiry). Use NSE option chain for live prices.",
+        "note": (
+            f"Live premiums from Fyers (expiry {chain_expiry})." if used_live_premiums
+            else "Premium estimates use Black-Scholes (15% IV, weekly expiry). Connect Fyers for live premiums."
+        ),
     }
 
 
