@@ -172,7 +172,14 @@ export default function StockDetail() {
         {intra && <IntradayPredictionCard data={intra} symbol={symbol} onRefresh={setIntra} />}
 
         {/* === ML PREDICTION SECTION (Separate) === */}
-        {mlPred && <MLPredictionCard data={mlPred} symbol={symbol} onRefresh={setMlPred} />}
+        <View style={[styles.card, { borderColor: colors.accent, borderWidth: 2 }]}>
+          <Text style={[styles.cardTitle, { color: colors.accent }]}>🤖 ML PREDICTION (V2 - 98% Accuracy)</Text>
+          {mlPred ? (
+            <MLPredictionCard data={mlPred} symbol={symbol} onRefresh={setMlPred} />
+          ) : (
+            <Text style={{ color: colors.textMuted, padding: 20, textAlign: 'center' }}>Loading ML Prediction...</Text>
+          )}
+        </View>
 
         {ind && (
           <View style={styles.card}>

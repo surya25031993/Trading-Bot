@@ -192,8 +192,14 @@ export type MLPredictionItem = {
   confidence: number;
   reason: string;
   model_votes: { xgb?: string; rf?: string; gb?: string };
-  training: { samples: number; best_model: string };
+  probabilities?: { xgb?: number; rf?: number; gb?: number };
+  avg_probability?: number;
+  is_high_confidence?: boolean;
+  training: { samples: number; train_samples?: number; val_samples?: number; best_model: string; best_accuracy?: number };
   backtest_accuracy: number;
+  high_conf_accuracy?: number;
+  high_conf_signals?: number;
+  model_accuracies?: { xgb?: number; rf?: number; gb?: number };
 };
 
 export type MLPrediction = {
