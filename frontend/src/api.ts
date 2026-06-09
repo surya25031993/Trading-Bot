@@ -48,6 +48,71 @@ export type Portfolio = {
   positions: Position[];
 };
 
+export type Prediction = {
+  symbol: string;
+  current_price: number;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  confidence_pct: number;
+  bull_count: number;
+  bear_count: number;
+  neutral_count: number;
+  net_score: number;
+  atr_pct: number;
+  volatility_pct: number;
+  predictions: {
+    horizon: string;
+    days: number;
+    target: number;
+    low: number;
+    high: number;
+    prob_up: number;
+    expected_change_pct: number;
+  }[];
+  key_drivers: { name: string; reason: string }[];
+  risk_factors: { name: string; reason: string }[];
+  recommendation: string;
+  recommendation_color: "profit" | "loss" | "warning" | "neutral";
+  narrative: string;
+};
+
+export type IntradayForecast = {
+  symbol: string;
+  interval: string;
+  current_price: number;
+  as_of: string;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  confidence_pct: number;
+  bull_count: number;
+  bear_count: number;
+  net_score: number;
+  volatility_5m_pct: number;
+  atr_pct: number;
+  predictions: {
+    label: string;
+    bars: number;
+    target: number;
+    low: number;
+    high: number;
+    prob_up: number;
+    expected_change_pct: number;
+    predicted_direction: "UP" | "DOWN" | "FLAT";
+  }[];
+  backtest: {
+    label: string;
+    bars: number;
+    total_signals: number;
+    directional_accuracy_pct: number;
+    long_accuracy_pct: number;
+    short_accuracy_pct: number;
+    within_1sigma_band_pct: number;
+    mae_pct: number;
+    samples: number;
+  }[];
+  overall_accuracy_pct: number;
+  backtest_window_bars: number;
+  backtest_window_days_approx: number;
+};
+
 export type Trade = {
   id: string; symbol: string; name: string; side: "BUY" | "SELL";
   quantity: number; price: number; total: number; timestamp: string;
@@ -86,6 +151,8 @@ export const api = {
   optionsChain: (index: string) => req<any>(`/options/chain?index=${index}`),
   optionsPaperTrade: (body: { index: string; legs: any[] }) => req<any>("/options/paper-trade", { method: "POST", body: JSON.stringify(body) }),
   stockChart: (sym: string) => req<any>(`/stocks/${encodeURIComponent(sym)}/chart`),
+  stockPredict: (sym: string) => req<Prediction>(`/stocks/${encodeURIComponent(sym)}/predict`),
+  stockIntradayForecast: (sym: string) => req<IntradayForecast>(`/stocks/${encodeURIComponent(sym)}/intraday-forecast`),
 
   // ============ Bot ============
   botStatus: () => req<any>("/bot/status"),

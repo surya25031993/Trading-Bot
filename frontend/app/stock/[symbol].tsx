@@ -5,10 +5,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { api, IndicatorData, Quote } from "@/src/api";
+import { api, IndicatorData, Quote, Prediction, IntradayForecast } from "@/src/api";
 import { colors, fonts, API } from "@/src/theme";
 import { LineChart } from "@/src/components/LineChart";
 import { AdvancedChart, ChartData } from "@/src/components/AdvancedChart";
+import { PredictionCard } from "@/src/components/PredictionCard";
+import { IntradayPredictionCard } from "@/src/components/IntradayPredictionCard";
 import { ArrowLeft, Sparkles, Star } from "lucide-react-native";
 
 type TradeSide = "BUY" | "SELL";
@@ -23,6 +25,7 @@ export default function StockDetail() {
   const [chart, setChart] = useState<{ close: number }[]>([]);
   const [advChart, setAdvChart] = useState<ChartData | null>(null);
   const [ind, setInd] = useState<IndicatorData | null>(null);
+  const [pred, setPred] = useState<Prediction | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [aiText, setAiText] = useState("");
@@ -35,15 +38,19 @@ export default function StockDetail() {
 
   const load = useCallback(async () => {
     try {
-      const [d, s, c] = await Promise.all([
+      const [d, s, c, p, intraData] = await Promise.all([
         api.stockDetail(symbol),
         api.stockSignals(symbol).catch(() => null),
         api.stockChart(symbol).catch(() => null),
+        api.stockPredict(symbol).catch(() => null),
+        api.stockIntradayForecast(symbol).catch(() => null),
       ]);
       setQuote(d.quote);
       setChart(d.chart.map((c) => ({ close: c.close })));
       if (s) setInd(s);
       if (c) setAdvChart(c);
+      if (p) setPred(p);
+      if (intraData) setIntra(intraData);
     } catch (e) {
       console.warn(e);
     } finally {
@@ -152,6 +159,12 @@ export default function StockDetail() {
           <Text style={styles.cardTitle}>Technical Charts · All Indicators</Text>
           {advChart ? <AdvancedChart data={advChart} /> : <LineChart data={chart} color={positive ? colors.profit : colors.loss} />}
         </View>
+
+        {/* === ALGO PREDICTION SECTION === */}
+        {pred && <PredictionCard data={pred} />}
+
+        {/* === INTRADAY 5/10/15/30-min FORECAST + BACKTEST === */}
+        {intra && <IntradayPredictionCard data={intra} />}
 
         {ind && (
           <View style={styles.card}>

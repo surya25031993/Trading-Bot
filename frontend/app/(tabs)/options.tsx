@@ -6,6 +6,9 @@ import { colors, fonts } from "@/src/theme";
 import { PayoffChart } from "@/src/components/PayoffChart";
 import { AdvancedChart, ChartData } from "@/src/components/AdvancedChart";
 import { OptionPremiumChart, OptionCandle } from "@/src/components/OptionPremiumChart";
+import { PredictionCard } from "@/src/components/PredictionCard";
+import { IntradayPredictionCard } from "@/src/components/IntradayPredictionCard";
+import { Prediction, IntradayForecast } from "@/src/api";
 import { Sparkles, TrendingUp, TrendingDown, Minus } from "lucide-react-native";
 
 function fyersUnavailableMsg(chain: any): string {
@@ -26,6 +29,8 @@ export default function Options() {
   const [calcLoading, setCalcLoading] = useState(false);
   const [chain, setChain] = useState<any>(null);
   const [indexChart, setIndexChart] = useState<ChartData | null>(null);
+  const [prediction, setPrediction] = useState<Prediction | null>(null);
+  const [intraday, setIntraday] = useState<IntradayForecast | null>(null);
   const [ceCandles, setCeCandles] = useState<OptionCandle[]>([]);
   const [peCandles, setPeCandles] = useState<OptionCandle[]>([]);
   const [atmInfo, setAtmInfo] = useState<{ ceSym: string; peSym: string; strike: number } | null>(null);
@@ -67,17 +72,24 @@ export default function Options() {
       } catch {
         setChain(null);
       }
-      // Load index advanced chart
+      // Load index advanced chart + prediction
       try {
         const idxSymMap: Record<string, string> = { NIFTY: "^NSEI", SENSEX: "^BSESN", BANKNIFTY: "^NSEBANK" };
         const sym = idxSymMap[idx];
         if (sym) {
-          const ch = await api.stockChart(sym);
+          const [ch, pred, intra] = await Promise.all([
+            api.stockChart(sym),
+            api.stockPredict(sym).catch(() => null),
+            api.stockIntradayForecast(sym).catch(() => null),
+          ]);
           setIndexChart(ch);
+          setPrediction(pred);
+          setIntraday(intra);
         }
       } catch (e) {
         console.warn("index chart load", e);
         setIndexChart(null);
+        setPrediction(null);
       }
     } catch (e) {
       console.warn("options load", e);
@@ -180,6 +192,12 @@ export default function Options() {
                 <AdvancedChart data={indexChart} />
               </View>
             )}
+
+            {/* === ALGO PREDICTION SECTION === */}
+            {prediction && <PredictionCard data={prediction} />}
+
+            {/* === INTRADAY 5/10/15/30-min FORECAST + BACKTEST === */}
+            {intraday && <IntradayPredictionCard data={intraday} />}
 
             {/* Strategy recommendation */}
             <View style={styles.card} testID="strategy-card">

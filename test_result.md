@@ -188,3 +188,10 @@ agent_communication:
   - agent: "main"
     message: |
       Fixed root cause of dead backend. requirements.txt had two packages merged on one line preventing yfinance from installing; .env files were missing. Installed yfinance, scipy, fyers-apiv3, recreated .env. Backend healthy. Confirmed all 8 quant signals returned by /api/stocks/{sym}/signals (incl. Supertrend, ADX, Stochastic). Frontend now exposes new indicators on stock detail and auto-polls every 30-60s.
+  - agent: "main"
+    message: |
+      Added Intraday 5/10/15/30-min Prediction with Walk-Forward Backtest. New backend endpoint /api/stocks/{symbol}/intraday-forecast fetches 60-day 5-min candles, computes vectorized 8-indicator series (no look-ahead), and returns:
+      (a) Live predictions for next 1/2/3/6 bars (5/10/15/30 min) with target, 1σ range, P(UP) and direction;
+      (b) Walk-forward backtest over last ~250 bars producing per-horizon directional accuracy, long/short accuracy, within-1σ hit rate and MAE;
+      (c) Overall ensemble accuracy across all horizons.
+      New IntradayPredictionCard component renders timeframe tabs (5/10/15/30 min), live target+P(UP)+range, backtest accuracy with progress bars, mini-stats row (long/short/MAE/vol), and overall accuracy banner. Wired into Options tab and stock detail. Verified on NIFTY 5-min — 244 bars (~3.3 days), 193 signals, 44.6% direction accuracy, 86.9% in-range hits, MAE 0.06%, overall 42.4%.

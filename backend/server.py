@@ -162,6 +162,131 @@ def fetch_history(symbol: str, period: str = "3mo", interval: str = "1d") -> pd.
     return t.history(period=period, interval=interval)
 
 
+def compute_signal_series(df: pd.DataFrame) -> pd.DataFrame:
+    """Vectorized indicator scores per bar (for backtesting & multi-step prediction).
+    Returns DataFrame with: buy_count, sell_count, net_score, atr, atr_pct per bar.
+    Each bar uses only past data (no look-ahead)."""
+    if df.empty or len(df) < 30:
+        return pd.DataFrame()
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+
+    # SMA / EMA
+    sma20 = close.rolling(20).mean()
+    sma50 = close.rolling(50).mean()
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+
+    # RSI(14)
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+
+    # MACD
+    macd = ema12 - ema26
+    macd_sig = macd.ewm(span=9, adjust=False).mean()
+
+    # Bollinger
+    bb_mid = close.rolling(20).mean()
+    bb_std = close.rolling(20).std()
+    bb_upper = bb_mid + 2 * bb_std
+    bb_lower = bb_mid - 2 * bb_std
+
+    # ATR
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(14).mean()
+
+    # Supertrend(10,3)
+    hl2 = (high + low) / 2
+    ub = hl2 + 3.0 * atr
+    lb = hl2 - 3.0 * atr
+    supertrend = pd.Series(index=df.index, dtype=float)
+    st_up = pd.Series(index=df.index, dtype=bool)
+    in_up = True
+    for i in range(len(df)):
+        if i == 0 or pd.isna(atr.iloc[i]):
+            supertrend.iloc[i] = float(ub.iloc[i]) if not pd.isna(ub.iloc[i]) else float(close.iloc[i])
+            st_up.iloc[i] = True
+            continue
+        prev_close = float(close.iloc[i-1])
+        prev_st = float(supertrend.iloc[i-1])
+        if prev_close > prev_st:
+            supertrend.iloc[i] = max(float(lb.iloc[i]), prev_st)
+            in_up = True
+        else:
+            supertrend.iloc[i] = min(float(ub.iloc[i]), prev_st)
+            in_up = False
+        if float(close.iloc[i]) > supertrend.iloc[i] and not in_up:
+            in_up = True
+            supertrend.iloc[i] = float(lb.iloc[i])
+        elif float(close.iloc[i]) < supertrend.iloc[i] and in_up:
+            in_up = False
+            supertrend.iloc[i] = float(ub.iloc[i])
+        st_up.iloc[i] = in_up
+
+    # ADX(14)
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=df.index)
+    atr14 = tr.rolling(14).mean().replace(0, np.nan)
+    plus_di = 100 * (plus_dm.rolling(14).mean() / atr14)
+    minus_di = 100 * (minus_dm.rolling(14).mean() / atr14)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx = dx.rolling(14).mean()
+
+    # Stochastic(14,3)
+    lowest_low = low.rolling(14).min()
+    highest_high = high.rolling(14).max()
+    stoch_k = 100 * (close - lowest_low) / (highest_high - lowest_low).replace(0, np.nan)
+    stoch_d = stoch_k.rolling(3).mean()
+
+    # === Score signals per bar (boolean votes) ===
+    # SMA crossover: buy if sma20 > sma50, sell if <
+    sma_buy = (sma20 > sma50).astype(int)
+    sma_sell = (sma20 < sma50).astype(int)
+    # EMA: buy if ema12 > ema26
+    ema_buy = (ema12 > ema26).astype(int)
+    ema_sell = (ema12 < ema26).astype(int)
+    # RSI: buy if < 30 (oversold reversal), sell if > 70
+    rsi_buy = (rsi < 30).astype(int)
+    rsi_sell = (rsi > 70).astype(int)
+    # MACD: buy if histogram > 0 and rising, sell if < 0 and falling
+    macd_hist = macd - macd_sig
+    macd_buy = ((macd_hist > 0) & (macd_hist > macd_hist.shift())).astype(int)
+    macd_sell = ((macd_hist < 0) & (macd_hist < macd_hist.shift())).astype(int)
+    # Bollinger: buy if close < lower (oversold bounce), sell if > upper
+    bb_buy = (close < bb_lower).astype(int)
+    bb_sell = (close > bb_upper).astype(int)
+    # Supertrend
+    st_buy = st_up.astype(int)
+    st_sell = (~st_up).astype(int)
+    # ADX directional
+    adx_buy = ((adx > 20) & (plus_di > minus_di)).astype(int)
+    adx_sell = ((adx > 20) & (minus_di > plus_di)).astype(int)
+    # Stochastic: buy if k crossed above d under 20; sell if crossed below over 80
+    stoch_buy = ((stoch_k > stoch_d) & (stoch_k < 30)).astype(int)
+    stoch_sell = ((stoch_k < stoch_d) & (stoch_k > 70)).astype(int)
+
+    buy_count = sma_buy + ema_buy + rsi_buy + macd_buy + bb_buy + st_buy + adx_buy + stoch_buy
+    sell_count = sma_sell + ema_sell + rsi_sell + macd_sell + bb_sell + st_sell + adx_sell + stoch_sell
+
+    return pd.DataFrame({
+        "close": close,
+        "buy_count": buy_count,
+        "sell_count": sell_count,
+        "net_score": buy_count - sell_count,
+        "atr": atr,
+        "atr_pct": atr / close,
+    })
+
+
 def compute_indicators(df: pd.DataFrame) -> dict:
     """Compute SMA, EMA, RSI, MACD, Bollinger Bands. Returns latest values + signals."""
     if df.empty or len(df) < 30:
@@ -444,6 +569,321 @@ async def stock_signals(symbol: str):
         raise HTTPException(status_code=404, detail="No data for symbol")
     result = await asyncio.to_thread(compute_indicators, df)
     return result
+
+
+@api_router.get("/stocks/{symbol}/predict")
+async def stock_predict(symbol: str):
+    """Predict next move using all 8 indicators + volatility-based probability bands."""
+    import math
+    try:
+        from scipy.stats import norm  # type: ignore
+        _has_scipy = True
+    except Exception:
+        _has_scipy = False
+
+    df = await asyncio.to_thread(fetch_history, symbol, "6mo", "1d")
+    if df.empty or len(df) < 30:
+        raise HTTPException(status_code=404, detail="Insufficient data for prediction")
+
+    ind = await asyncio.to_thread(compute_indicators, df)
+    if "error" in ind:
+        raise HTTPException(status_code=500, detail="Indicator computation failed")
+
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    spot = float(close.iloc[-1])
+
+    # ATR(14) for volatility
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = float(tr.rolling(14).mean().iloc[-1])
+    atr_pct = atr / spot if spot > 0 else 0.01
+
+    # Historical daily log volatility (last 60 days)
+    log_ret = np.log(close / close.shift(1)).dropna().tail(60)
+    daily_sigma = float(log_ret.std()) if len(log_ret) > 1 else 0.015
+
+    bull = int(ind.get("buy_count", 0))
+    bear = int(ind.get("sell_count", 0))
+    total = 8
+    net = bull - bear
+    confidence_pct = round(max(bull, bear) / total * 100)
+
+    if net >= 2:
+        direction = "BULLISH"
+    elif net <= -2:
+        direction = "BEARISH"
+    else:
+        direction = "NEUTRAL"
+
+    # Directional bias: net signal score scaled to [-0.7, 0.7] of ATR magnitude
+    bias = (net / total) * 0.7
+
+    horizons = [
+        ("Next Day", 1),
+        ("1 Week", 5),
+        ("1 Month", 22),
+    ]
+    predictions = []
+    for label, days in horizons:
+        sigma_h = daily_sigma * math.sqrt(days)
+        # Expected directional move proportional to ATR and bias
+        expected_move = bias * atr * math.sqrt(days)
+        target = spot + expected_move
+        # 1-sigma probability band (~68% confidence)
+        band_low = target * math.exp(-sigma_h)
+        band_high = target * math.exp(sigma_h)
+        # P(close > spot) using normal CDF on log-return drift
+        if _has_scipy and sigma_h > 0:
+            drift = math.log(target / spot) if target > 0 else 0
+            prob_up = round(float(norm.cdf(drift / sigma_h)) * 100, 1)
+        else:
+            # fallback heuristic
+            prob_up = 50.0 + (bias * 35) - (0 if days == 1 else (days - 1) * 0.5)
+            prob_up = max(5.0, min(95.0, round(prob_up, 1)))
+        predictions.append({
+            "horizon": label,
+            "days": days,
+            "target": round(target, 2),
+            "low": round(band_low, 2),
+            "high": round(band_high, 2),
+            "prob_up": prob_up,
+            "expected_change_pct": round((target / spot - 1) * 100, 2),
+        })
+
+    # Key drivers — top signals aligned with prevailing direction
+    align = "BUY" if net >= 0 else "SELL"
+    counter = "SELL" if net >= 0 else "BUY"
+    drivers = [{"name": s["name"], "reason": s["reason"]} for s in ind["signals"] if s["action"] == align][:4]
+    risks = [{"name": s["name"], "reason": s["reason"]} for s in ind["signals"] if s["action"] == counter][:3]
+
+    # Recommendation logic
+    if confidence_pct >= 60 and direction == "BULLISH":
+        rec = "BUY / ACCUMULATE"
+        rec_color = "profit"
+    elif confidence_pct >= 60 and direction == "BEARISH":
+        rec = "SELL / EXIT LONGS"
+        rec_color = "loss"
+    elif direction == "NEUTRAL":
+        rec = "RANGE-BOUND · OPTIONS PLAY"
+        rec_color = "warning"
+    else:
+        rec = "WAIT · WEAK CONSENSUS"
+        rec_color = "neutral"
+
+    # Plain English summary
+    pred_1d = predictions[0]
+    move_direction_word = "rise" if pred_1d["expected_change_pct"] > 0.05 else "fall" if pred_1d["expected_change_pct"] < -0.05 else "consolidate"
+    narrative = (
+        f"{bull} of {total} algorithms signal BUY, {bear} signal SELL. "
+        f"Expected to {move_direction_word} to ₹{pred_1d['target']:.2f} tomorrow "
+        f"({pred_1d['prob_up']:.0f}% probability of close above current price). "
+        f"Volatility ATR ~{atr_pct*100:.1f}%. "
+        + (f"Strong {direction.lower()} setup." if confidence_pct >= 60 else "Mixed signals — trade with caution.")
+    )
+
+    return {
+        "symbol": symbol,
+        "current_price": round(spot, 2),
+        "direction": direction,
+        "confidence_pct": confidence_pct,
+        "bull_count": bull,
+        "bear_count": bear,
+        "neutral_count": int(ind.get("hold_count", 0)),
+        "net_score": net,
+        "atr_pct": round(atr_pct * 100, 2),
+        "volatility_pct": round(daily_sigma * 100, 2),
+        "predictions": predictions,
+        "key_drivers": drivers,
+        "risk_factors": risks,
+        "recommendation": rec,
+        "recommendation_color": rec_color,
+        "narrative": narrative,
+    }
+
+
+@api_router.get("/stocks/{symbol}/intraday-forecast")
+async def stock_intraday_forecast(symbol: str):
+    """5-min candle predictions for next 5/10/15/30 min + walk-forward backtest accuracy."""
+    import math
+    df = await asyncio.to_thread(fetch_history, symbol, "60d", "5m")
+    if df.empty or len(df) < 100:
+        raise HTTPException(status_code=404, detail="Insufficient intraday data")
+
+    series = await asyncio.to_thread(compute_signal_series, df)
+    if series.empty:
+        raise HTTPException(status_code=500, detail="Indicator computation failed")
+
+    horizons = [
+        {"label": "5 min", "bars": 1},
+        {"label": "10 min", "bars": 2},
+        {"label": "15 min", "bars": 3},
+        {"label": "30 min", "bars": 6},
+    ]
+
+    last_idx = len(series) - 1
+    last = series.iloc[last_idx]
+    spot = float(last["close"])
+    atr = float(last["atr"]) if not pd.isna(last["atr"]) else 0.0
+    net = int(last["net_score"]) if not pd.isna(last["net_score"]) else 0
+    bull = int(last["buy_count"]) if not pd.isna(last["buy_count"]) else 0
+    bear = int(last["sell_count"]) if not pd.isna(last["sell_count"]) else 0
+    confidence_pct = round(max(bull, bear) / 8 * 100)
+    if net >= 2:
+        direction = "BULLISH"
+    elif net <= -2:
+        direction = "BEARISH"
+    else:
+        direction = "NEUTRAL"
+
+    close_s = series["close"]
+    log_ret = np.log(close_s / close_s.shift(1)).dropna().tail(200)
+    sigma_5m = float(log_ret.std()) if len(log_ret) > 1 else 0.001
+    bias = (net / 8) * 0.55
+
+    live_predictions = []
+    for h in horizons:
+        bars = h["bars"]
+        sigma_h = sigma_5m * math.sqrt(bars)
+        expected_move = bias * atr * math.sqrt(bars)
+        target = spot + expected_move
+        band_low = target * math.exp(-sigma_h) if sigma_h > 0 else target * 0.998
+        band_high = target * math.exp(sigma_h) if sigma_h > 0 else target * 1.002
+        try:
+            from scipy.stats import norm  # type: ignore
+            drift = math.log(target / spot) if target > 0 and spot > 0 else 0
+            prob_up = round(float(norm.cdf(drift / sigma_h)) * 100, 1) if sigma_h > 0 else 50.0
+        except Exception:
+            prob_up = max(5.0, min(95.0, 50.0 + (bias * 30)))
+        live_predictions.append({
+            "label": h["label"],
+            "bars": bars,
+            "target": round(target, 2),
+            "low": round(band_low, 2),
+            "high": round(band_high, 2),
+            "prob_up": prob_up,
+            "expected_change_pct": round((target / spot - 1) * 100, 3),
+            "predicted_direction": "UP" if expected_move > 0.001 * spot else "DOWN" if expected_move < -0.001 * spot else "FLAT",
+        })
+
+    # Walk-forward backtest
+    max_future = max(h["bars"] for h in horizons)
+    backtest_start = max(60, len(series) - 250)
+    backtest_end = len(series) - max_future
+    indices = list(range(backtest_start, backtest_end))
+    if len(indices) > 200:
+        step = max(1, len(indices) // 200)
+        indices = indices[::step]
+
+    bt = {h["label"]: {
+        "bars": h["bars"], "total": 0, "correct": 0,
+        "long_total": 0, "long_correct": 0,
+        "short_total": 0, "short_correct": 0,
+        "within_band": 0, "preds": [], "acts": []
+    } for h in horizons}
+
+    for i in indices:
+        row = series.iloc[i]
+        if pd.isna(row["net_score"]) or pd.isna(row["atr"]):
+            continue
+        bar_net = int(row["net_score"])
+        bar_spot = float(row["close"])
+        bar_atr = float(row["atr"])
+        bar_bias = (bar_net / 8) * 0.55
+        if bar_net >= 2:
+            pred_dir = 1
+        elif bar_net <= -2:
+            pred_dir = -1
+        else:
+            pred_dir = 0
+
+        for h in horizons:
+            bars = h["bars"]
+            if i + bars >= len(series):
+                continue
+            future_close = float(series.iloc[i + bars]["close"])
+            actual_change = future_close - bar_spot
+            actual_dir = 1 if actual_change > 0 else -1 if actual_change < 0 else 0
+            sigma_h = sigma_5m * math.sqrt(bars)
+            expected_move = bar_bias * bar_atr * math.sqrt(bars)
+            target = bar_spot + expected_move
+            band_low = target * math.exp(-sigma_h) if sigma_h > 0 else target * 0.998
+            band_high = target * math.exp(sigma_h) if sigma_h > 0 else target * 1.002
+
+            b = bt[h["label"]]
+            if pred_dir != 0:
+                b["total"] += 1
+                if pred_dir == actual_dir:
+                    b["correct"] += 1
+                if pred_dir == 1:
+                    b["long_total"] += 1
+                    if actual_dir == 1:
+                        b["long_correct"] += 1
+                else:
+                    b["short_total"] += 1
+                    if actual_dir == -1:
+                        b["short_correct"] += 1
+            if band_low <= future_close <= band_high:
+                b["within_band"] += 1
+            b["preds"].append(target / bar_spot - 1)
+            b["acts"].append(future_close / bar_spot - 1)
+
+    total_samples = len(indices)
+    backtest_summary = []
+    for h in horizons:
+        b = bt[h["label"]]
+        total = b["total"]
+        acc = round(b["correct"] / total * 100, 1) if total > 0 else 0.0
+        long_acc = round(b["long_correct"] / b["long_total"] * 100, 1) if b["long_total"] > 0 else 0.0
+        short_acc = round(b["short_correct"] / b["short_total"] * 100, 1) if b["short_total"] > 0 else 0.0
+        band_hit = round(b["within_band"] / total_samples * 100, 1) if total_samples > 0 else 0.0
+        if b["preds"]:
+            errs = [abs(p - a) for p, a in zip(b["preds"], b["acts"])]
+            mae_pct = round(float(np.mean(errs)) * 100, 3)
+        else:
+            mae_pct = 0.0
+        backtest_summary.append({
+            "label": h["label"],
+            "bars": h["bars"],
+            "total_signals": total,
+            "directional_accuracy_pct": acc,
+            "long_accuracy_pct": long_acc,
+            "short_accuracy_pct": short_acc,
+            "within_1sigma_band_pct": band_hit,
+            "mae_pct": mae_pct,
+            "samples": total_samples,
+        })
+
+    sum_total = sum(b["total_signals"] for b in backtest_summary)
+    overall_acc = round(
+        sum(b["directional_accuracy_pct"] * b["total_signals"] for b in backtest_summary) / sum_total, 1
+    ) if sum_total > 0 else 0.0
+
+    last_ts = df.index[-1]
+    last_ts_str = last_ts.strftime("%Y-%m-%d %H:%M") if hasattr(last_ts, "strftime") else str(last_ts)
+
+    return {
+        "symbol": symbol,
+        "interval": "5m",
+        "current_price": round(spot, 2),
+        "as_of": last_ts_str,
+        "direction": direction,
+        "confidence_pct": confidence_pct,
+        "bull_count": bull,
+        "bear_count": bear,
+        "net_score": net,
+        "volatility_5m_pct": round(sigma_5m * 100, 3),
+        "atr_pct": round(atr / spot * 100, 3) if spot > 0 else 0.0,
+        "predictions": live_predictions,
+        "backtest": backtest_summary,
+        "overall_accuracy_pct": overall_acc,
+        "backtest_window_bars": total_samples,
+        "backtest_window_days_approx": round(total_samples * 5 / 60 / 6.25, 1),
+    }
+
 
 
 @api_router.get("/signals/top")
@@ -1009,6 +1449,62 @@ async def stock_chart(symbol: str, period: str = "3mo"):
     macd = ema12 - ema26
     signal = macd.ewm(span=9, adjust=False).mean()
     macd_hist = macd - signal
+
+    # === QUANT INDICATOR SERIES ===
+    # ATR for Supertrend & ADX
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(14).mean()
+
+    # Supertrend (10, 3)
+    hl2 = (high + low) / 2
+    multiplier = 3.0
+    upper_band = hl2 + multiplier * atr
+    lower_band = hl2 - multiplier * atr
+    supertrend = pd.Series(index=df.index, dtype=float)
+    st_dir = pd.Series(index=df.index, dtype=float)  # 1 = up, -1 = down
+    in_up = True
+    for i in range(len(df)):
+        if i == 0:
+            supertrend.iloc[i] = upper_band.iloc[i]
+            st_dir.iloc[i] = 1.0
+            continue
+        prev_close = float(close.iloc[i-1])
+        prev_st = float(supertrend.iloc[i-1])
+        if prev_close > prev_st:
+            supertrend.iloc[i] = max(float(lower_band.iloc[i]), prev_st)
+            in_up = True
+        else:
+            supertrend.iloc[i] = min(float(upper_band.iloc[i]), prev_st)
+            in_up = False
+        if float(close.iloc[i]) > supertrend.iloc[i] and not in_up:
+            in_up = True
+            supertrend.iloc[i] = float(lower_band.iloc[i])
+        elif float(close.iloc[i]) < supertrend.iloc[i] and in_up:
+            in_up = False
+            supertrend.iloc[i] = float(upper_band.iloc[i])
+        st_dir.iloc[i] = 1.0 if in_up else -1.0
+
+    # ADX (14)
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=df.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=df.index)
+    atr14 = tr.rolling(14).mean().replace(0, np.nan)
+    plus_di = 100 * (plus_dm.rolling(14).mean() / atr14)
+    minus_di = 100 * (minus_dm.rolling(14).mean() / atr14)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx = dx.rolling(14).mean()
+
+    # Stochastic (14, 3, 3)
+    period_st = 14
+    lowest_low = low.rolling(period_st).min()
+    highest_high = high.rolling(period_st).max()
+    stoch_k = 100 * (close - lowest_low) / (highest_high - lowest_low).replace(0, np.nan)
+    stoch_d = stoch_k.rolling(3).mean()
+
     # Take last 60 points
     tail = 60
     dates = [d.strftime("%Y-%m-%d") for d in df.index[-tail:]]
@@ -1027,6 +1523,13 @@ async def stock_chart(symbol: str, period: str = "3mo"):
         "macd": safe_list(macd),
         "macd_signal": safe_list(signal),
         "macd_hist": safe_list(macd_hist),
+        "supertrend": safe_list(supertrend),
+        "supertrend_dir": safe_list(st_dir),
+        "adx": safe_list(adx),
+        "plus_di": safe_list(plus_di),
+        "minus_di": safe_list(minus_di),
+        "stoch_k": safe_list(stoch_k),
+        "stoch_d": safe_list(stoch_d),
     }
 
 
