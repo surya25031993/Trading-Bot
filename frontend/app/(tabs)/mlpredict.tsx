@@ -329,6 +329,48 @@ export default function MLPredictScreen() {
               </View>
             </View>
 
+            {/* Trailing Stop Loss Section */}
+            {selected.entry_exit.trailing_stop?.enabled && (
+              <View style={styles.trailSection}>
+                <View style={styles.trailHeader}>
+                  <TrendingUp color={colors.accent} size={14} />
+                  <Text style={styles.trailTitle}>TRAILING STOP LOSS</Text>
+                  <View style={styles.trailBadge}>
+                    <Text style={styles.trailBadgeText}>AUTO</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.trailRules}>
+                  {selected.entry_exit.trailing_stop.rules.map((rule, idx) => (
+                    <View key={idx} style={styles.trailRule}>
+                      <View style={styles.trailRuleNum}>
+                        <Text style={styles.trailRuleNumText}>{idx + 1}</Text>
+                      </View>
+                      <View style={styles.trailRuleContent}>
+                        <Text style={styles.trailTrigger}>{rule.trigger}</Text>
+                        <Text style={styles.trailAction}>{rule.action}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.trailSummary}>
+                  <View style={styles.trailSummaryItem}>
+                    <Text style={styles.trailSummaryLabel}>At T1</Text>
+                    <Text style={styles.trailSummaryValue}>
+                      SL → ₹{selected.entry_exit.trailing_stop.trail_sl_at_t1.toLocaleString("en-IN")}
+                    </Text>
+                  </View>
+                  <View style={styles.trailSummaryItem}>
+                    <Text style={styles.trailSummaryLabel}>At T2</Text>
+                    <Text style={styles.trailSummaryValue}>
+                      SL → ₹{selected.entry_exit.trailing_stop.trail_sl_at_t2.toLocaleString("en-IN")}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
             <Text style={styles.eeDisclaimer}>
               ⚠️ Trade at your own risk. Always verify with your own analysis.
             </Text>
@@ -580,5 +622,101 @@ const styles = StyleSheet.create({
     textAlign: "center", 
     marginTop: 12, 
     fontStyle: "italic",
+  },
+
+  // Trailing Stop Loss Styles
+  trailSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  trailHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  trailTitle: {
+    color: colors.accent,
+    fontFamily: fonts.bodySemi,
+    fontSize: 11,
+    letterSpacing: 1,
+    flex: 1,
+  },
+  trailBadge: {
+    backgroundColor: colors.accent + "22",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  trailBadgeText: {
+    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1,
+  },
+  trailRules: {
+    backgroundColor: colors.bg,
+    borderRadius: 10,
+    padding: 12,
+  },
+  trailRule: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 10,
+  },
+  trailRuleNum: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.accent + "22",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  trailRuleNumText: {
+    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+  },
+  trailRuleContent: {
+    flex: 1,
+  },
+  trailTrigger: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: 11,
+  },
+  trailAction: {
+    color: colors.profit,
+    fontFamily: fonts.bodySemi,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  trailSummary: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  trailSummaryItem: {
+    flex: 1,
+    backgroundColor: colors.profit + "10",
+    borderRadius: 8,
+    padding: 10,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.profit + "33",
+  },
+  trailSummaryLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 9,
+  },
+  trailSummaryValue: {
+    color: colors.profit,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    marginTop: 2,
   },
 });

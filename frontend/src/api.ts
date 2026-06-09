@@ -202,6 +202,23 @@ export type MLPredictionItem = {
   model_accuracies?: { xgb?: number; rf?: number; gb?: number };
 };
 
+export type TrailingStopRule = {
+  trigger: string;
+  action: string;
+};
+
+export type TrailingStop = {
+  enabled: boolean;
+  activation_price: number;
+  activation_pct: number;
+  trail_distance_pct: number;
+  trail_sl_at_t1: number;
+  trail_sl_at_t1_note: string;
+  trail_sl_at_t2: number;
+  trail_sl_at_t2_note: string;
+  rules: TrailingStopRule[];
+};
+
 export type MLEntryExit = {
   trade_type: "LONG" | "SHORT";
   entry_price: number;
@@ -217,6 +234,7 @@ export type MLEntryExit = {
   is_high_confidence: boolean;
   suggested_qty_pct: number;
   timeframe: string;
+  trailing_stop?: TrailingStop;
 };
 
 export type MLPrediction = {

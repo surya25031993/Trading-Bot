@@ -2164,6 +2164,42 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         t1_pct = round(abs(target_1 - entry_price) / entry_price * 100, 2)
         t2_pct = round(abs(target_2 - entry_price) / entry_price * 100, 2)
         
+        # Trailing Stop Loss Configuration
+        # Trail SL as price moves in favor to lock in profits
+        trail_activation_pct = 0.3  # Activate trailing after 0.3% profit
+        trail_distance_pct = 0.2    # Trail by 0.2% from high/low
+        
+        if ml_direction == "BULLISH":
+            # For LONG: Trail below the highest price reached
+            trail_activation = round(entry_price * (1 + trail_activation_pct / 100), 2)
+            # When T1 hit, move SL to breakeven
+            trail_sl_at_t1 = entry_price
+            # When T2 hit, move SL to T1
+            trail_sl_at_t2 = target_1
+        else:
+            # For SHORT: Trail above the lowest price reached  
+            trail_activation = round(entry_price * (1 - trail_activation_pct / 100), 2)
+            # When T1 hit, move SL to breakeven
+            trail_sl_at_t1 = entry_price
+            # When T2 hit, move SL to T1
+            trail_sl_at_t2 = target_1
+        
+        trailing_stop = {
+            "enabled": True,
+            "activation_price": float(trail_activation),
+            "activation_pct": float(trail_activation_pct),
+            "trail_distance_pct": float(trail_distance_pct),
+            "trail_sl_at_t1": round(float(trail_sl_at_t1), 2),
+            "trail_sl_at_t1_note": "Move SL to breakeven when T1 is hit",
+            "trail_sl_at_t2": round(float(trail_sl_at_t2), 2),
+            "trail_sl_at_t2_note": "Move SL to T1 level when T2 is hit",
+            "rules": [
+                {"trigger": "Price hits Target 1", "action": f"Move SL to ₹{entry_price:,.2f} (breakeven)"},
+                {"trigger": "Price hits Target 2", "action": f"Move SL to ₹{target_1:,.2f} (lock T1 profit)"},
+                {"trigger": f"Every +{trail_distance_pct}% move", "action": f"Trail SL by {trail_distance_pct}%"},
+            ]
+        }
+        
         entry_exit = {
             "trade_type": trade_type,
             "entry_price": round(float(entry_price), 2),
@@ -2179,6 +2215,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             "is_high_confidence": bool(is_high_conf),
             "suggested_qty_pct": 5 if is_high_conf else 3,
             "timeframe": "Intraday (5-30 min)",
+            "trailing_stop": trailing_stop,
         }
     
     return {
