@@ -18,17 +18,7 @@ const SYMBOLS = [
   { symbol: "HDFCBANK.NS", name: "HDFC Bank" },
   { symbol: "ICICIBANK.NS", name: "ICICI Bank" },
   { symbol: "SBIN.NS", name: "SBI" },
-  { symbol: "BHARTIARTL.NS", name: "Bharti Airtel" },
   { symbol: "ITC.NS", name: "ITC" },
-  { symbol: "KOTAKBANK.NS", name: "Kotak Bank" },
-  { symbol: "LT.NS", name: "L&T" },
-  { symbol: "AXISBANK.NS", name: "Axis Bank" },
-  { symbol: "MARUTI.NS", name: "Maruti" },
-  { symbol: "TATAMOTORS.NS", name: "Tata Motors" },
-  { symbol: "SUNPHARMA.NS", name: "Sun Pharma" },
-  { symbol: "WIPRO.NS", name: "Wipro" },
-  { symbol: "HCLTECH.NS", name: "HCL Tech" },
-  { symbol: "ADANIENT.NS", name: "Adani Ent" },
 ];
 
 export default function MLPredictScreen() {
