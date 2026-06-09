@@ -639,12 +639,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", padding: 40 },
-  loadingText: { color: colors.text, fontFamily: fonts.bodySemi, fontSize: 16, marginTop: 16 },
+  loadingText: { color: colors.textPrimary, fontFamily: fonts.bodySemi, fontSize: 16, marginTop: 16 },
   loadingSubtext: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 12, marginTop: 4 },
 
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  headerTitle: { color: colors.text, fontFamily: fonts.headingSemi, fontSize: 20 },
+  headerTitle: { color: colors.textPrimary, fontFamily: fonts.headingSemi, fontSize: 20 },
   headerSubtitle: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 11 },
   accuracyBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.profit + "22", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
   accuracyText: { color: colors.profit, fontFamily: fonts.monoBold, fontSize: 14 },
@@ -658,7 +658,7 @@ const styles = StyleSheet.create({
 
   mainCard: { margin: 12, backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.accent + "44" },
   mainHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  mainSymbol: { color: colors.text, fontFamily: fonts.headingSemi, fontSize: 18 },
+  mainSymbol: { color: colors.textPrimary, fontFamily: fonts.headingSemi, fontSize: 18 },
   mainPrice: { color: colors.textSecondary, fontFamily: fonts.mono, fontSize: 14, marginTop: 2 },
   directionBadge: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
   directionText: { fontFamily: fonts.bodySemi, fontSize: 13 },
@@ -677,14 +677,14 @@ const styles = StyleSheet.create({
 
   predRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   predLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
-  predLabel: { color: colors.text, fontFamily: fonts.bodyMed, fontSize: 14, width: 55 },
+  predLabel: { color: colors.textPrimary, fontFamily: fonts.bodyMed, fontSize: 14, width: 55 },
   predDirBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   predDir: { fontFamily: fonts.bodySemi, fontSize: 11 },
   predRight: { flexDirection: "row", gap: 16 },
   predAccCol: { alignItems: "flex-end" },
   predAccColHC: { backgroundColor: colors.profit + "10", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
   predAccLabel: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 9 },
-  predAccValue: { color: colors.text, fontFamily: fonts.monoBold, fontSize: 14 },
+  predAccValue: { color: colors.textPrimary, fontFamily: fonts.monoBold, fontSize: 14 },
   predSignals: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 9, marginTop: 1 },
 
   modelInfo: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: 16, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
@@ -697,7 +697,7 @@ const styles = StyleSheet.create({
   summaryTitle: { color: colors.textSecondary, fontFamily: fonts.bodySemi, fontSize: 12, letterSpacing: 1, marginBottom: 12 },
   summaryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   summaryItem: { width: "31%", backgroundColor: colors.bg, borderRadius: 10, padding: 10, alignItems: "center" },
-  summaryName: { color: colors.text, fontFamily: fonts.bodyMed, fontSize: 11 },
+  summaryName: { color: colors.textPrimary, fontFamily: fonts.bodyMed, fontSize: 11 },
   summaryRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
   summaryDir: { fontFamily: fonts.bodySemi, fontSize: 10 },
   summaryAcc: { fontFamily: fonts.mono, fontSize: 11, marginTop: 2 },
@@ -725,7 +725,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   eeTitle: { 
-    color: colors.text, 
+    color: colors.textPrimary, 
     fontFamily: fonts.headingSemi, 
     fontSize: 14, 
     letterSpacing: 1,
@@ -790,7 +790,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   eeLevelValue: { 
-    color: colors.text, 
+    color: colors.textPrimary, 
     fontFamily: fonts.monoBold, 
     fontSize: 18, 
     marginTop: 2,
@@ -823,7 +823,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   eeRiskValue: { 
-    color: colors.text, 
+    color: colors.textPrimary, 
     fontFamily: fonts.mono, 
     fontSize: 11, 
     marginTop: 4,
@@ -1053,7 +1053,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   optTitle: {
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: fonts.headingSemi,
     fontSize: 12,
     letterSpacing: 1,
@@ -1092,7 +1092,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   optMainValue: {
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: fonts.monoBold,
     fontSize: 14,
     marginTop: 4,
@@ -1119,7 +1119,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   optRiskText: {
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: fonts.body,
     fontSize: 11,
     flex: 1,
@@ -1142,7 +1142,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   optSummaryValue: {
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: fonts.monoBold,
     fontSize: 12,
     marginTop: 2,
@@ -1188,7 +1188,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   strategyName: {
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: fonts.bodySemi,
     fontSize: 13,
   },
@@ -1254,7 +1254,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
   },
   strategyValue: {
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: fonts.mono,
     fontSize: 11,
     marginTop: 2,
@@ -1271,7 +1271,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   legText: {
-    color: colors.text,
+    color: colors.textPrimary,
     fontFamily: fonts.mono,
     fontSize: 10,
   },
