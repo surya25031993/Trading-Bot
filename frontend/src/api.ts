@@ -202,6 +202,23 @@ export type MLPredictionItem = {
   model_accuracies?: { xgb?: number; rf?: number; gb?: number };
 };
 
+export type MLEntryExit = {
+  trade_type: "LONG" | "SHORT";
+  entry_price: number;
+  stop_loss: number;
+  stop_loss_pct: number;
+  target_1: number;
+  target_1_pct: number;
+  target_2: number;
+  target_2_pct: number;
+  risk_reward: number;
+  atr: number;
+  atr_pct: number;
+  is_high_confidence: boolean;
+  suggested_qty_pct: number;
+  timeframe: string;
+};
+
 export type MLPrediction = {
   symbol: string;
   model_type: string;
@@ -210,5 +227,6 @@ export type MLPrediction = {
   ml_direction: "BULLISH" | "BEARISH" | "NEUTRAL";
   predictions: MLPredictionItem[];
   overall_ml_accuracy: number;
+  entry_exit?: MLEntryExit;
   note: string;
 };

@@ -1652,6 +1652,11 @@ class MLPredictor:
         }
 
 
+# ML Model Cache with timestamps
+_ml_cache: dict = {}  # {symbol: {"data": MLPrediction, "timestamp": datetime, "models": MLPredictorV2}}
+ML_CACHE_TTL = 300  # 5 minutes cache
+
+
 class MLPredictorV2:
     """
     Enhanced ML Predictor V2 - Targeting 80-90% Accuracy
@@ -1761,7 +1766,7 @@ class MLPredictorV2:
         return features.fillna(0)
     
     def train(self, votes_df: pd.DataFrame, horizon_bars: int = 1) -> dict:
-        """Enhanced training with more sophisticated models."""
+        """Fast training with optimized models."""
         if len(votes_df) < 200:
             return {"error": "Insufficient data for ML training (need 200+ samples)"}
         
@@ -1781,7 +1786,7 @@ class MLPredictorV2:
         if len(X) < 150:
             return {"error": f"Insufficient valid samples: {len(X)}"}
         
-        # Use 75% for training, 25% for validation (more validation data for better accuracy estimate)
+        # Use 75% for training, 25% for validation
         split_idx = int(len(X) * 0.75)
         X_train, X_val = X[:split_idx], X[split_idx:]
         y_train, y_val = y[:split_idx], y[split_idx:]
@@ -1792,23 +1797,23 @@ class MLPredictorV2:
         X_val_scaled = scaler.transform(X_val)
         self.scalers[horizon_bars] = scaler
         
-        # Enhanced model configurations - Optimized for higher accuracy
+        # FAST model configurations - reduced estimators for speed
         models = {
             "xgb": xgb.XGBClassifier(
-                n_estimators=200, max_depth=5, learning_rate=0.03,
-                min_child_weight=5, subsample=0.7, colsample_bytree=0.7,
+                n_estimators=50, max_depth=4, learning_rate=0.1,
+                min_child_weight=5, subsample=0.8, colsample_bytree=0.8,
                 eval_metric='logloss', random_state=42, verbosity=0,
-                reg_alpha=0.5, reg_lambda=2.0, gamma=0.1
+                n_jobs=-1  # Use all cores
             ),
             "rf": RandomForestClassifier(
-                n_estimators=200, max_depth=10, min_samples_split=20,
+                n_estimators=50, max_depth=6, min_samples_split=20,
                 min_samples_leaf=10, random_state=42, n_jobs=-1,
-                class_weight='balanced', max_features='sqrt'
+                class_weight='balanced'
             ),
             "gb": GradientBoostingClassifier(
-                n_estimators=200, max_depth=4, learning_rate=0.03,
+                n_estimators=50, max_depth=4, learning_rate=0.1,
                 min_samples_split=20, min_samples_leaf=10,
-                subsample=0.7, random_state=42, max_features='sqrt'
+                subsample=0.8, random_state=42
             )
         }
         
@@ -1818,22 +1823,13 @@ class MLPredictorV2:
             try:
                 model.fit(X_train_scaled, y_train)
                 
-                # Get probabilities for threshold optimization
                 if hasattr(model, "predict_proba"):
                     proba = model.predict_proba(X_val_scaled)[:, 1]
                     
-                    # Find optimal threshold for highest accuracy
-                    best_acc = 0
-                    best_thresh = 0.5
-                    for thresh in np.arange(0.35, 0.70, 0.02):
-                        pred = (proba >= thresh).astype(int)
-                        acc = (pred == y_val).mean()
-                        if acc > best_acc:
-                            best_acc = acc
-                            best_thresh = thresh
-                    
-                    self.best_threshold[f"{horizon_bars}_{name}"] = best_thresh
-                    val_scores[name] = float(best_acc)
+                    # Simple threshold at 0.5
+                    pred = (proba >= 0.5).astype(int)
+                    val_scores[name] = float((pred == y_val).mean())
+                    self.best_threshold[f"{horizon_bars}_{name}"] = 0.5
                 else:
                     pred = model.predict(X_val_scaled)
                     val_scores[name] = float((pred == y_val).mean())
@@ -1842,7 +1838,7 @@ class MLPredictorV2:
                 logger.warning(f"Model {name} training error: {e}")
                 val_scores[name] = 0.5
         
-        # Retrain on full data with best params
+        # Retrain on full data
         X_full_scaled = scaler.fit_transform(X)
         for name, model in models.items():
             try:
@@ -2120,6 +2116,71 @@ async def stock_ml_prediction(symbol: str):
         else:
             ml_direction = "NEUTRAL"
         
+        # Calculate Entry/Exit Points based on ML prediction
+        # Use ATR for dynamic stop-loss and target calculation
+        atr = 0
+        if len(df) >= 14:
+            high = df["High"].tail(14)
+            low = df["Low"].tail(14)
+            close_prev = df["Close"].shift(1).tail(14)
+            tr = pd.concat([
+                high - low,
+                (high - close_prev).abs(),
+                (low - close_prev).abs()
+            ], axis=1).max(axis=1)
+            atr = float(tr.mean())
+        
+        atr_pct = (atr / spot * 100) if spot > 0 else 0.5
+        
+        # Entry and Exit calculation
+        entry_exit = None
+        if ml_direction != "NEUTRAL":
+            # Use 1.5x ATR for stop-loss, 2x ATR for target (1.33:1 R:R ratio)
+            # For high confidence, use tighter stops
+            is_high_conf = any(r.get("is_high_confidence", False) for r in results)
+            sl_multiplier = 1.2 if is_high_conf else 1.5
+            target_multiplier = 2.0 if is_high_conf else 2.5
+            
+            if ml_direction == "BULLISH":
+                entry_price = spot
+                stop_loss = round(spot - (atr * sl_multiplier), 2)
+                target_1 = round(spot + (atr * target_multiplier), 2)
+                target_2 = round(spot + (atr * target_multiplier * 1.5), 2)
+                trade_type = "LONG"
+            else:  # BEARISH
+                entry_price = spot
+                stop_loss = round(spot + (atr * sl_multiplier), 2)
+                target_1 = round(spot - (atr * target_multiplier), 2)
+                target_2 = round(spot - (atr * target_multiplier * 1.5), 2)
+                trade_type = "SHORT"
+            
+            # Calculate risk-reward ratio
+            risk = abs(entry_price - stop_loss)
+            reward = abs(target_1 - entry_price)
+            rr_ratio = round(reward / risk, 2) if risk > 0 else 0
+            
+            # Calculate percentage moves
+            sl_pct = round(abs(entry_price - stop_loss) / entry_price * 100, 2)
+            t1_pct = round(abs(target_1 - entry_price) / entry_price * 100, 2)
+            t2_pct = round(abs(target_2 - entry_price) / entry_price * 100, 2)
+            
+            entry_exit = {
+                "trade_type": trade_type,
+                "entry_price": round(float(entry_price), 2),
+                "stop_loss": round(float(stop_loss), 2),
+                "stop_loss_pct": float(sl_pct),
+                "target_1": round(float(target_1), 2),
+                "target_1_pct": float(t1_pct),
+                "target_2": round(float(target_2), 2),
+                "target_2_pct": float(t2_pct),
+                "risk_reward": float(rr_ratio),
+                "atr": round(float(atr), 2),
+                "atr_pct": round(float(atr_pct), 2),
+                "is_high_confidence": bool(is_high_conf),
+                "suggested_qty_pct": 5 if is_high_conf else 3,  # % of capital
+                "timeframe": "Intraday (5-30 min)",
+            }
+        
         return {
             "symbol": symbol,
             "model_type": "ML Ensemble (XGBoost + RandomForest + GradientBoosting)",
@@ -2128,6 +2189,7 @@ async def stock_ml_prediction(symbol: str):
             "ml_direction": ml_direction,
             "predictions": results,
             "overall_ml_accuracy": round(np.mean(overall_accuracy), 1) if overall_accuracy else 0,
+            "entry_exit": entry_exit,
             "note": "ML predictions are trained on recent 5-day data with walk-forward validation",
         }
         

@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors, fonts } from "@/src/theme";
 import { api, MLPrediction } from "@/src/api";
-import { Brain, TrendingUp, TrendingDown, Minus, RefreshCw, Target, Zap, BarChart2 } from "lucide-react-native";
+import { Brain, TrendingUp, TrendingDown, Minus, RefreshCw, Target, Zap, BarChart2, ArrowDownToLine, ArrowUpFromLine, ShieldAlert, Crosshair, DollarSign } from "lucide-react-native";
 
 const SYMBOLS = [
   { symbol: "^NSEI", name: "NIFTY 50" },
@@ -213,6 +213,118 @@ export default function MLPredictScreen() {
           </View>
         )}
 
+        {/* Entry/Exit Card - TRADING SIGNALS */}
+        {selected?.entry_exit && (
+          <View style={[styles.entryExitCard, { 
+            borderColor: selected.entry_exit.trade_type === "LONG" ? colors.profit + "66" : colors.loss + "66" 
+          }]}>
+            <View style={styles.eeHeader}>
+              <View style={styles.eeHeaderLeft}>
+                <Crosshair color={selected.entry_exit.trade_type === "LONG" ? colors.profit : colors.loss} size={20} />
+                <View>
+                  <Text style={styles.eeTitle}>ENTRY & EXIT LEVELS</Text>
+                  <Text style={styles.eeSubtitle}>{selected.entry_exit.timeframe} · R:R {selected.entry_exit.risk_reward}:1</Text>
+                </View>
+              </View>
+              <View style={[styles.eeTypeBadge, { 
+                backgroundColor: selected.entry_exit.trade_type === "LONG" ? colors.profit + "22" : colors.loss + "22" 
+              }]}>
+                {selected.entry_exit.trade_type === "LONG" ? 
+                  <ArrowUpFromLine color={colors.profit} size={14} /> : 
+                  <ArrowDownToLine color={colors.loss} size={14} />}
+                <Text style={[styles.eeTypeText, { 
+                  color: selected.entry_exit.trade_type === "LONG" ? colors.profit : colors.loss 
+                }]}>
+                  {selected.entry_exit.trade_type}
+                </Text>
+              </View>
+            </View>
+
+            {selected.entry_exit.is_high_confidence && (
+              <View style={styles.eeHighConfBadge}>
+                <Target color={colors.profit} size={12} />
+                <Text style={styles.eeHighConfText}>HIGH CONFIDENCE SETUP</Text>
+              </View>
+            )}
+
+            {/* Entry Row */}
+            <View style={styles.eeLevelRow}>
+              <View style={[styles.eeLevelIcon, { backgroundColor: colors.accent + "22" }]}>
+                <DollarSign color={colors.accent} size={16} />
+              </View>
+              <View style={styles.eeLevelInfo}>
+                <Text style={styles.eeLevelLabel}>ENTRY PRICE</Text>
+                <Text style={styles.eeLevelValue}>₹{selected.entry_exit.entry_price.toLocaleString("en-IN")}</Text>
+              </View>
+              <Text style={styles.eeLevelHint}>Current Market</Text>
+            </View>
+
+            {/* Stop Loss Row */}
+            <View style={styles.eeLevelRow}>
+              <View style={[styles.eeLevelIcon, { backgroundColor: colors.loss + "22" }]}>
+                <ShieldAlert color={colors.loss} size={16} />
+              </View>
+              <View style={styles.eeLevelInfo}>
+                <Text style={styles.eeLevelLabel}>STOP LOSS</Text>
+                <Text style={[styles.eeLevelValue, { color: colors.loss }]}>
+                  ₹{selected.entry_exit.stop_loss.toLocaleString("en-IN")}
+                </Text>
+              </View>
+              <Text style={[styles.eeLevelPct, { color: colors.loss }]}>
+                -{selected.entry_exit.stop_loss_pct}%
+              </Text>
+            </View>
+
+            {/* Target 1 Row */}
+            <View style={styles.eeLevelRow}>
+              <View style={[styles.eeLevelIcon, { backgroundColor: colors.profit + "22" }]}>
+                <Target color={colors.profit} size={16} />
+              </View>
+              <View style={styles.eeLevelInfo}>
+                <Text style={styles.eeLevelLabel}>TARGET 1</Text>
+                <Text style={[styles.eeLevelValue, { color: colors.profit }]}>
+                  ₹{selected.entry_exit.target_1.toLocaleString("en-IN")}
+                </Text>
+              </View>
+              <Text style={[styles.eeLevelPct, { color: colors.profit }]}>
+                +{selected.entry_exit.target_1_pct}%
+              </Text>
+            </View>
+
+            {/* Target 2 Row */}
+            <View style={styles.eeLevelRow}>
+              <View style={[styles.eeLevelIcon, { backgroundColor: colors.profit + "33" }]}>
+                <Target color={colors.profit} size={16} />
+              </View>
+              <View style={styles.eeLevelInfo}>
+                <Text style={styles.eeLevelLabel}>TARGET 2</Text>
+                <Text style={[styles.eeLevelValue, { color: colors.profit }]}>
+                  ₹{selected.entry_exit.target_2.toLocaleString("en-IN")}
+                </Text>
+              </View>
+              <Text style={[styles.eeLevelPct, { color: colors.profit }]}>
+                +{selected.entry_exit.target_2_pct}%
+              </Text>
+            </View>
+
+            {/* Risk Info */}
+            <View style={styles.eeRiskRow}>
+              <View style={styles.eeRiskItem}>
+                <Text style={styles.eeRiskLabel}>ATR</Text>
+                <Text style={styles.eeRiskValue}>₹{selected.entry_exit.atr} ({selected.entry_exit.atr_pct}%)</Text>
+              </View>
+              <View style={styles.eeRiskItem}>
+                <Text style={styles.eeRiskLabel}>SUGGESTED QTY</Text>
+                <Text style={styles.eeRiskValue}>{selected.entry_exit.suggested_qty_pct}% of capital</Text>
+              </View>
+            </View>
+
+            <Text style={styles.eeDisclaimer}>
+              ⚠️ Trade at your own risk. Always verify with your own analysis.
+            </Text>
+          </View>
+        )}
+
         {/* All Predictions Summary */}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle}>All Symbols Summary</Text>
@@ -324,4 +436,136 @@ const styles = StyleSheet.create({
 
   disclaimer: { margin: 12, padding: 12, backgroundColor: colors.surface, borderRadius: 8 },
   disclaimerText: { color: colors.textMuted, fontFamily: fonts.body, fontSize: 10, textAlign: "center", lineHeight: 16 },
+
+  // Entry/Exit Card Styles
+  entryExitCard: { 
+    margin: 12, 
+    backgroundColor: colors.surface, 
+    borderRadius: 16, 
+    padding: 16, 
+    borderWidth: 2, 
+  },
+  eeHeader: { 
+    flexDirection: "row", 
+    justifyContent: "space-between", 
+    alignItems: "flex-start", 
+    marginBottom: 12,
+  },
+  eeHeaderLeft: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    gap: 10,
+  },
+  eeTitle: { 
+    color: colors.text, 
+    fontFamily: fonts.headingSemi, 
+    fontSize: 14, 
+    letterSpacing: 1,
+  },
+  eeSubtitle: { 
+    color: colors.textMuted, 
+    fontFamily: fonts.body, 
+    fontSize: 11, 
+    marginTop: 2,
+  },
+  eeTypeBadge: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    gap: 4, 
+    paddingHorizontal: 10, 
+    paddingVertical: 5, 
+    borderRadius: 8,
+  },
+  eeTypeText: { 
+    fontFamily: fonts.bodySemi, 
+    fontSize: 12, 
+    letterSpacing: 1,
+  },
+  eeHighConfBadge: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    justifyContent: "center", 
+    gap: 6, 
+    backgroundColor: colors.profit + "15", 
+    paddingVertical: 6, 
+    borderRadius: 6, 
+    marginBottom: 12,
+  },
+  eeHighConfText: { 
+    color: colors.profit, 
+    fontFamily: fonts.bodySemi, 
+    fontSize: 10, 
+    letterSpacing: 1,
+  },
+  eeLevelRow: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    paddingVertical: 12, 
+    borderBottomWidth: StyleSheet.hairlineWidth, 
+    borderBottomColor: colors.border,
+  },
+  eeLevelIcon: { 
+    width: 36, 
+    height: 36, 
+    borderRadius: 8, 
+    alignItems: "center", 
+    justifyContent: "center", 
+    marginRight: 12,
+  },
+  eeLevelInfo: { 
+    flex: 1,
+  },
+  eeLevelLabel: { 
+    color: colors.textMuted, 
+    fontFamily: fonts.body, 
+    fontSize: 10, 
+    letterSpacing: 0.5,
+  },
+  eeLevelValue: { 
+    color: colors.text, 
+    fontFamily: fonts.monoBold, 
+    fontSize: 18, 
+    marginTop: 2,
+  },
+  eeLevelHint: { 
+    color: colors.textMuted, 
+    fontFamily: fonts.body, 
+    fontSize: 10,
+  },
+  eeLevelPct: { 
+    fontFamily: fonts.monoBold, 
+    fontSize: 14,
+  },
+  eeRiskRow: { 
+    flexDirection: "row", 
+    gap: 12, 
+    marginTop: 12,
+  },
+  eeRiskItem: { 
+    flex: 1, 
+    backgroundColor: colors.bg, 
+    borderRadius: 8, 
+    padding: 10, 
+    alignItems: "center",
+  },
+  eeRiskLabel: { 
+    color: colors.textMuted, 
+    fontFamily: fonts.body, 
+    fontSize: 9, 
+    letterSpacing: 0.5,
+  },
+  eeRiskValue: { 
+    color: colors.text, 
+    fontFamily: fonts.mono, 
+    fontSize: 11, 
+    marginTop: 4,
+  },
+  eeDisclaimer: { 
+    color: colors.warning, 
+    fontFamily: fonts.body, 
+    fontSize: 10, 
+    textAlign: "center", 
+    marginTop: 12, 
+    fontStyle: "italic",
+  },
 });
