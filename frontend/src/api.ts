@@ -237,7 +237,7 @@ export type MLEntryExit = {
   trailing_stop?: TrailingStop;
 };
 
-export type OptionLeg = {
+export type OptionLegML = {
   action: string;
   type: string;
   strike: number;
@@ -268,7 +268,7 @@ export type OptionSuggestionML = {
   breakeven: number;
   strategy: string;
   strategy_note: string;
-  legs: OptionLeg[];
+  legs: OptionLegML[];
   risk_management: OptionRiskManagement;
   confidence: string;
   expiry_note: string;
