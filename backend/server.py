@@ -2218,8 +2218,8 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             "trailing_stop": trailing_stop,
         }
     
-    # Option Suggestions based on ML prediction
-    option_suggestion = None
+    # Option Suggestions based on ML prediction - Multiple Strategies
+    option_suggestions = []
     
     # Determine if this is an index (options tradeable)
     index_map = {
@@ -2235,6 +2235,9 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         
         # Calculate ATM strike (rounded to nearest strike gap)
         atm_strike = round(spot / strike_gap) * strike_gap
+        itm_strike = atm_strike - strike_gap if ml_direction == "BULLISH" else atm_strike + strike_gap
+        otm_strike = atm_strike + strike_gap if ml_direction == "BULLISH" else atm_strike - strike_gap
+        otm2_strike = atm_strike + (2 * strike_gap) if ml_direction == "BULLISH" else atm_strike - (2 * strike_gap)
         
         # Estimate IV and days to expiry for premium calculation
         iv = 0.15  # 15% implied volatility estimate
@@ -2242,86 +2245,208 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         T = days_to_expiry / 365
         r = 0.07  # Risk-free rate
         
+        from scipy.stats import norm
+        
+        def calc_call_premium(strike_price):
+            if T <= 0:
+                return max(0, spot - strike_price)
+            d1 = (np.log(spot / strike_price) + (r + 0.5 * iv ** 2) * T) / (iv * np.sqrt(T))
+            d2 = d1 - iv * np.sqrt(T)
+            return round(spot * norm.cdf(d1) - strike_price * np.exp(-r * T) * norm.cdf(d2), 2)
+        
+        def calc_put_premium(strike_price):
+            if T <= 0:
+                return max(0, strike_price - spot)
+            d1 = (np.log(spot / strike_price) + (r + 0.5 * iv ** 2) * T) / (iv * np.sqrt(T))
+            d2 = d1 - iv * np.sqrt(T)
+            return round(strike_price * np.exp(-r * T) * norm.cdf(-d2) - spot * norm.cdf(-d1), 2)
+        
         if ml_direction == "BULLISH":
-            # Suggest buying Call option
-            opt_type = "CE"
-            strike = atm_strike  # ATM Call
-            otm_strike = atm_strike + strike_gap  # Slightly OTM for spread
+            # Strategy 1: Long Call (ATM)
+            atm_ce_premium = calc_call_premium(atm_strike)
+            option_suggestions.append({
+                "strategy_id": 1,
+                "strategy": "Long Call",
+                "type": "DIRECTIONAL",
+                "risk_level": "MODERATE",
+                "option_type": "CE",
+                "strike": int(atm_strike),
+                "premium": float(atm_ce_premium),
+                "lot_size": lot_size,
+                "total_cost": round(float(atm_ce_premium * lot_size), 2),
+                "max_loss": round(float(atm_ce_premium * lot_size), 2),
+                "max_profit": "Unlimited",
+                "breakeven": round(float(atm_strike + atm_ce_premium), 2),
+                "stop_loss": round(float(atm_ce_premium * 0.5), 2),
+                "target": round(float(atm_ce_premium * 2), 2),
+                "legs": [{"action": "BUY", "type": "CE", "strike": int(atm_strike), "premium": float(atm_ce_premium)}],
+                "note": "Simple bullish bet - buy ATM Call",
+            })
             
-            # Estimate premium using Black-Scholes approximation
-            d1 = (np.log(spot / strike) + (r + 0.5 * iv ** 2) * T) / (iv * np.sqrt(T)) if T > 0 else 0
-            d2 = d1 - iv * np.sqrt(T) if T > 0 else 0
-            from scipy.stats import norm
-            premium_est = spot * norm.cdf(d1) - strike * np.exp(-r * T) * norm.cdf(d2) if T > 0 else max(0, spot - strike)
-            premium_est = round(premium_est, 2)
+            # Strategy 2: OTM Call (Cheaper, Higher Risk)
+            otm_ce_premium = calc_call_premium(otm_strike)
+            option_suggestions.append({
+                "strategy_id": 2,
+                "strategy": "Long OTM Call",
+                "type": "AGGRESSIVE",
+                "risk_level": "HIGH",
+                "option_type": "CE",
+                "strike": int(otm_strike),
+                "premium": float(otm_ce_premium),
+                "lot_size": lot_size,
+                "total_cost": round(float(otm_ce_premium * lot_size), 2),
+                "max_loss": round(float(otm_ce_premium * lot_size), 2),
+                "max_profit": "Unlimited",
+                "breakeven": round(float(otm_strike + otm_ce_premium), 2),
+                "stop_loss": round(float(otm_ce_premium * 0.4), 2),
+                "target": round(float(otm_ce_premium * 3), 2),
+                "legs": [{"action": "BUY", "type": "CE", "strike": int(otm_strike), "premium": float(otm_ce_premium)}],
+                "note": "Cheaper entry, needs bigger move to profit",
+            })
             
-            # Stop loss at 50% of premium, target at 100% profit
-            option_sl = round(premium_est * 0.5, 2)
-            option_t1 = round(premium_est * 2, 2)  # 100% profit
-            option_t2 = round(premium_est * 3, 2)  # 200% profit
+            # Strategy 3: Bull Call Spread (Limited Risk)
+            otm_ce_sell_premium = calc_call_premium(otm_strike)
+            spread_cost = atm_ce_premium - otm_ce_sell_premium
+            option_suggestions.append({
+                "strategy_id": 3,
+                "strategy": "Bull Call Spread",
+                "type": "CONSERVATIVE",
+                "risk_level": "LOW",
+                "option_type": "CE",
+                "strike": int(atm_strike),
+                "premium": float(spread_cost),
+                "lot_size": lot_size,
+                "total_cost": round(float(spread_cost * lot_size), 2),
+                "max_loss": round(float(spread_cost * lot_size), 2),
+                "max_profit": round(float((otm_strike - atm_strike - spread_cost) * lot_size), 2),
+                "breakeven": round(float(atm_strike + spread_cost), 2),
+                "stop_loss": round(float(spread_cost * 0.5), 2),
+                "target": round(float(spread_cost * 1.5), 2),
+                "legs": [
+                    {"action": "BUY", "type": "CE", "strike": int(atm_strike), "premium": float(atm_ce_premium)},
+                    {"action": "SELL", "type": "CE", "strike": int(otm_strike), "premium": float(otm_ce_sell_premium)},
+                ],
+                "note": "Limited risk & reward - good for uncertain markets",
+            })
             
-            strategy = "Long Call" if is_high_conf else "Bull Call Spread"
-            strategy_note = "Buy ATM Call for directional play" if is_high_conf else "Buy ATM Call + Sell OTM Call for limited risk"
+            # Strategy 4: ITM Call (Higher Delta, Safer)
+            itm_ce_premium = calc_call_premium(itm_strike)
+            option_suggestions.append({
+                "strategy_id": 4,
+                "strategy": "Long ITM Call",
+                "type": "CONSERVATIVE",
+                "risk_level": "LOW",
+                "option_type": "CE",
+                "strike": int(itm_strike),
+                "premium": float(itm_ce_premium),
+                "lot_size": lot_size,
+                "total_cost": round(float(itm_ce_premium * lot_size), 2),
+                "max_loss": round(float(itm_ce_premium * lot_size), 2),
+                "max_profit": "Unlimited",
+                "breakeven": round(float(itm_strike + itm_ce_premium), 2),
+                "stop_loss": round(float(itm_ce_premium * 0.6), 2),
+                "target": round(float(itm_ce_premium * 1.5), 2),
+                "legs": [{"action": "BUY", "type": "CE", "strike": int(itm_strike), "premium": float(itm_ce_premium)}],
+                "note": "Higher premium but moves more with underlying",
+            })
             
         else:  # BEARISH
-            # Suggest buying Put option
-            opt_type = "PE"
-            strike = atm_strike  # ATM Put
-            otm_strike = atm_strike - strike_gap  # Slightly OTM for spread
+            # Strategy 1: Long Put (ATM)
+            atm_pe_premium = calc_put_premium(atm_strike)
+            option_suggestions.append({
+                "strategy_id": 1,
+                "strategy": "Long Put",
+                "type": "DIRECTIONAL",
+                "risk_level": "MODERATE",
+                "option_type": "PE",
+                "strike": int(atm_strike),
+                "premium": float(atm_pe_premium),
+                "lot_size": lot_size,
+                "total_cost": round(float(atm_pe_premium * lot_size), 2),
+                "max_loss": round(float(atm_pe_premium * lot_size), 2),
+                "max_profit": round(float((atm_strike - atm_pe_premium) * lot_size), 2),
+                "breakeven": round(float(atm_strike - atm_pe_premium), 2),
+                "stop_loss": round(float(atm_pe_premium * 0.5), 2),
+                "target": round(float(atm_pe_premium * 2), 2),
+                "legs": [{"action": "BUY", "type": "PE", "strike": int(atm_strike), "premium": float(atm_pe_premium)}],
+                "note": "Simple bearish bet - buy ATM Put",
+            })
             
-            # Estimate premium using Black-Scholes approximation
-            d1 = (np.log(spot / strike) + (r + 0.5 * iv ** 2) * T) / (iv * np.sqrt(T)) if T > 0 else 0
-            d2 = d1 - iv * np.sqrt(T) if T > 0 else 0
-            from scipy.stats import norm
-            premium_est = strike * np.exp(-r * T) * norm.cdf(-d2) - spot * norm.cdf(-d1) if T > 0 else max(0, strike - spot)
-            premium_est = round(premium_est, 2)
+            # Strategy 2: OTM Put (Cheaper, Higher Risk)
+            otm_pe_premium = calc_put_premium(otm_strike)
+            option_suggestions.append({
+                "strategy_id": 2,
+                "strategy": "Long OTM Put",
+                "type": "AGGRESSIVE",
+                "risk_level": "HIGH",
+                "option_type": "PE",
+                "strike": int(otm_strike),
+                "premium": float(otm_pe_premium),
+                "lot_size": lot_size,
+                "total_cost": round(float(otm_pe_premium * lot_size), 2),
+                "max_loss": round(float(otm_pe_premium * lot_size), 2),
+                "max_profit": round(float((otm_strike - otm_pe_premium) * lot_size), 2),
+                "breakeven": round(float(otm_strike - otm_pe_premium), 2),
+                "stop_loss": round(float(otm_pe_premium * 0.4), 2),
+                "target": round(float(otm_pe_premium * 3), 2),
+                "legs": [{"action": "BUY", "type": "PE", "strike": int(otm_strike), "premium": float(otm_pe_premium)}],
+                "note": "Cheaper entry, needs bigger move to profit",
+            })
             
-            # Stop loss at 50% of premium, target at 100% profit
-            option_sl = round(premium_est * 0.5, 2)
-            option_t1 = round(premium_est * 2, 2)  # 100% profit
-            option_t2 = round(premium_est * 3, 2)  # 200% profit
+            # Strategy 3: Bear Put Spread (Limited Risk)
+            otm_pe_sell_premium = calc_put_premium(otm_strike)
+            spread_cost = atm_pe_premium - otm_pe_sell_premium
+            option_suggestions.append({
+                "strategy_id": 3,
+                "strategy": "Bear Put Spread",
+                "type": "CONSERVATIVE",
+                "risk_level": "LOW",
+                "option_type": "PE",
+                "strike": int(atm_strike),
+                "premium": float(spread_cost),
+                "lot_size": lot_size,
+                "total_cost": round(float(spread_cost * lot_size), 2),
+                "max_loss": round(float(spread_cost * lot_size), 2),
+                "max_profit": round(float((atm_strike - otm_strike - spread_cost) * lot_size), 2),
+                "breakeven": round(float(atm_strike - spread_cost), 2),
+                "stop_loss": round(float(spread_cost * 0.5), 2),
+                "target": round(float(spread_cost * 1.5), 2),
+                "legs": [
+                    {"action": "BUY", "type": "PE", "strike": int(atm_strike), "premium": float(atm_pe_premium)},
+                    {"action": "SELL", "type": "PE", "strike": int(otm_strike), "premium": float(otm_pe_sell_premium)},
+                ],
+                "note": "Limited risk & reward - good for uncertain markets",
+            })
             
-            strategy = "Long Put" if is_high_conf else "Bear Put Spread"
-            strategy_note = "Buy ATM Put for directional play" if is_high_conf else "Buy ATM Put + Sell OTM Put for limited risk"
+            # Strategy 4: ITM Put (Higher Delta, Safer)
+            itm_pe_premium = calc_put_premium(itm_strike)
+            option_suggestions.append({
+                "strategy_id": 4,
+                "strategy": "Long ITM Put",
+                "type": "CONSERVATIVE",
+                "risk_level": "LOW",
+                "option_type": "PE",
+                "strike": int(itm_strike),
+                "premium": float(itm_pe_premium),
+                "lot_size": lot_size,
+                "total_cost": round(float(itm_pe_premium * lot_size), 2),
+                "max_loss": round(float(itm_pe_premium * lot_size), 2),
+                "max_profit": round(float((itm_strike - itm_pe_premium) * lot_size), 2),
+                "breakeven": round(float(itm_strike - itm_pe_premium), 2),
+                "stop_loss": round(float(itm_pe_premium * 0.6), 2),
+                "target": round(float(itm_pe_premium * 1.5), 2),
+                "legs": [{"action": "BUY", "type": "PE", "strike": int(itm_strike), "premium": float(itm_pe_premium)}],
+                "note": "Higher premium but moves more with underlying",
+            })
         
-        # Calculate max loss and breakeven
-        max_loss = premium_est * lot_size
-        breakeven = strike + premium_est if opt_type == "CE" else strike - premium_est
-        
-        option_suggestion = {
-            "index": idx_info["name"],
-            "direction": ml_direction,
-            "option_type": opt_type,
-            "strike": int(atm_strike),
-            "lot_size": lot_size,
-            "premium_estimate": float(premium_est),
-            "total_premium": round(float(premium_est * lot_size), 2),
-            "stop_loss_premium": float(option_sl),
-            "target_1_premium": float(option_t1),
-            "target_2_premium": float(option_t2),
-            "max_loss": round(float(max_loss), 2),
-            "breakeven": round(float(breakeven), 2),
-            "strategy": strategy,
-            "strategy_note": strategy_note,
-            "legs": [
-                {
-                    "action": "BUY",
-                    "type": opt_type,
-                    "strike": int(atm_strike),
-                    "premium": float(premium_est),
-                    "qty": 1,
-                }
-            ],
-            "risk_management": {
-                "entry": f"Buy {idx_info['name']} {int(atm_strike)} {opt_type} @ ₹{premium_est}",
-                "stop_loss": f"Exit if premium falls to ₹{option_sl} (50% loss)",
-                "target_1": f"Book 50% at ₹{option_t1} (100% profit)",
-                "target_2": f"Trail remaining to ₹{option_t2} (200% profit)",
-                "max_risk": f"₹{max_loss:,.0f} ({lot_size} lot × ₹{premium_est})",
-            },
-            "confidence": "HIGH" if is_high_conf else "MODERATE",
-            "expiry_note": "Weekly expiry recommended for intraday/short-term",
-        }
+        # Add recommendation based on confidence
+        for opt in option_suggestions:
+            if is_high_conf and opt["type"] == "DIRECTIONAL":
+                opt["recommended"] = True
+            elif not is_high_conf and opt["type"] == "CONSERVATIVE":
+                opt["recommended"] = True
+            else:
+                opt["recommended"] = False
     
     return {
         "symbol": symbol,
@@ -2332,7 +2457,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         "predictions": results,
         "overall_ml_accuracy": round(np.mean(overall_accuracy), 1) if overall_accuracy else 0,
         "entry_exit": entry_exit,
-        "option_suggestion": option_suggestion,
+        "option_suggestions": option_suggestions if option_suggestions else None,
         "note": "ML predictions are trained on recent 5-day data with walk-forward validation",
         "cached": False,
     }

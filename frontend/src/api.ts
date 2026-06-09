@@ -254,24 +254,23 @@ export type OptionRiskManagement = {
 };
 
 export type OptionSuggestionML = {
-  index: string;
-  direction: string;
+  strategy_id: number;
+  strategy: string;
+  type: string;
+  risk_level: string;
   option_type: string;
   strike: number;
+  premium: number;
   lot_size: number;
-  premium_estimate: number;
-  total_premium: number;
-  stop_loss_premium: number;
-  target_1_premium: number;
-  target_2_premium: number;
+  total_cost: number;
   max_loss: number;
+  max_profit: number | string;
   breakeven: number;
-  strategy: string;
-  strategy_note: string;
+  stop_loss: number;
+  target: number;
   legs: OptionLegML[];
-  risk_management: OptionRiskManagement;
-  confidence: string;
-  expiry_note: string;
+  note: string;
+  recommended?: boolean;
 };
 
 export type MLPrediction = {
@@ -283,7 +282,7 @@ export type MLPrediction = {
   predictions: MLPredictionItem[];
   overall_ml_accuracy: number;
   entry_exit?: MLEntryExit;
-  option_suggestion?: OptionSuggestionML;
+  option_suggestions?: OptionSuggestionML[];
   note: string;
   cached?: boolean;
   cache_age_seconds?: number;

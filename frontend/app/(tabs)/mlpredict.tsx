@@ -15,6 +15,20 @@ const SYMBOLS = [
   { symbol: "RELIANCE.NS", name: "Reliance" },
   { symbol: "TCS.NS", name: "TCS" },
   { symbol: "INFY.NS", name: "Infosys" },
+  { symbol: "HDFCBANK.NS", name: "HDFC Bank" },
+  { symbol: "ICICIBANK.NS", name: "ICICI Bank" },
+  { symbol: "SBIN.NS", name: "SBI" },
+  { symbol: "BHARTIARTL.NS", name: "Bharti Airtel" },
+  { symbol: "ITC.NS", name: "ITC" },
+  { symbol: "KOTAKBANK.NS", name: "Kotak Bank" },
+  { symbol: "LT.NS", name: "L&T" },
+  { symbol: "AXISBANK.NS", name: "Axis Bank" },
+  { symbol: "MARUTI.NS", name: "Maruti" },
+  { symbol: "TATAMOTORS.NS", name: "Tata Motors" },
+  { symbol: "SUNPHARMA.NS", name: "Sun Pharma" },
+  { symbol: "WIPRO.NS", name: "Wipro" },
+  { symbol: "HCLTECH.NS", name: "HCL Tech" },
+  { symbol: "ADANIENT.NS", name: "Adani Ent" },
 ];
 
 export default function MLPredictScreen() {
@@ -377,108 +391,93 @@ export default function MLPredictScreen() {
           </View>
         )}
 
-        {/* Option Suggestion Card */}
-        {selected?.option_suggestion && (
-          <View style={[styles.optionCard, { 
-            borderColor: selected.option_suggestion.option_type === "CE" ? colors.profit + "66" : colors.loss + "66" 
-          }]}>
+        {/* Option Strategies Card - Multiple Strategies */}
+        {selected?.option_suggestions && selected.option_suggestions.length > 0 && (
+          <View style={styles.optionCard}>
             <View style={styles.optHeader}>
               <View style={styles.optHeaderLeft}>
-                <Activity color={selected.option_suggestion.option_type === "CE" ? colors.profit : colors.loss} size={20} />
+                <Activity color={colors.accent} size={20} />
                 <View>
-                  <Text style={styles.optTitle}>OPTION SUGGESTION</Text>
-                  <Text style={styles.optSubtitle}>{selected.option_suggestion.strategy}</Text>
+                  <Text style={styles.optTitle}>OPTION STRATEGIES</Text>
+                  <Text style={styles.optSubtitle}>{selected.option_suggestions.length} strategies based on {selected.ml_direction} outlook</Text>
                 </View>
               </View>
-              <View style={[styles.optTypeBadge, { 
-                backgroundColor: selected.option_suggestion.option_type === "CE" ? colors.profit + "22" : colors.loss + "22" 
-              }]}>
-                <Text style={[styles.optTypeText, { 
-                  color: selected.option_suggestion.option_type === "CE" ? colors.profit : colors.loss 
-                }]}>
-                  {selected.option_suggestion.option_type}
-                </Text>
-              </View>
             </View>
 
-            {/* Option Details */}
-            <View style={styles.optMainRow}>
-              <View style={styles.optMainCol}>
-                <Text style={styles.optMainLabel}>CONTRACT</Text>
-                <Text style={styles.optMainValue}>
-                  {selected.option_suggestion.index} {selected.option_suggestion.strike} {selected.option_suggestion.option_type}
-                </Text>
-              </View>
-              <View style={styles.optMainCol}>
-                <Text style={styles.optMainLabel}>PREMIUM</Text>
-                <Text style={styles.optMainValue}>₹{selected.option_suggestion.premium_estimate}</Text>
-              </View>
-              <View style={styles.optMainCol}>
-                <Text style={styles.optMainLabel}>LOT SIZE</Text>
-                <Text style={styles.optMainValue}>{selected.option_suggestion.lot_size}</Text>
-              </View>
-            </View>
+            {selected.option_suggestions.map((opt, idx) => (
+              <View key={idx} style={[styles.strategyCard, opt.recommended && styles.strategyCardRecommended]}>
+                <View style={styles.strategyHeader}>
+                  <View style={styles.strategyHeaderLeft}>
+                    <Text style={styles.strategyName}>{opt.strategy}</Text>
+                    {opt.recommended && (
+                      <View style={styles.recommendedBadge}>
+                        <Text style={styles.recommendedText}>RECOMMENDED</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={[styles.riskBadge, { 
+                    backgroundColor: opt.risk_level === "LOW" ? colors.profit + "22" : 
+                                   opt.risk_level === "HIGH" ? colors.loss + "22" : colors.warning + "22" 
+                  }]}>
+                    <Text style={[styles.riskText, { 
+                      color: opt.risk_level === "LOW" ? colors.profit : 
+                             opt.risk_level === "HIGH" ? colors.loss : colors.warning 
+                    }]}>
+                      {opt.risk_level}
+                    </Text>
+                  </View>
+                </View>
 
-            {/* Risk Management */}
-            <View style={styles.optRiskSection}>
-              <Text style={styles.optRiskTitle}>RISK MANAGEMENT</Text>
-              
-              <View style={styles.optRiskItem}>
-                <View style={[styles.optRiskDot, { backgroundColor: colors.accent }]} />
-                <Text style={styles.optRiskText}>{selected.option_suggestion.risk_management.entry}</Text>
-              </View>
-              
-              <View style={styles.optRiskItem}>
-                <View style={[styles.optRiskDot, { backgroundColor: colors.loss }]} />
-                <Text style={[styles.optRiskText, { color: colors.loss }]}>
-                  {selected.option_suggestion.risk_management.stop_loss}
-                </Text>
-              </View>
-              
-              <View style={styles.optRiskItem}>
-                <View style={[styles.optRiskDot, { backgroundColor: colors.profit }]} />
-                <Text style={[styles.optRiskText, { color: colors.profit }]}>
-                  {selected.option_suggestion.risk_management.target_1}
-                </Text>
-              </View>
-              
-              <View style={styles.optRiskItem}>
-                <View style={[styles.optRiskDot, { backgroundColor: colors.profit }]} />
-                <Text style={[styles.optRiskText, { color: colors.profit }]}>
-                  {selected.option_suggestion.risk_management.target_2}
-                </Text>
-              </View>
-            </View>
+                <View style={styles.strategyDetails}>
+                  <View style={styles.strategyRow}>
+                    <View style={styles.strategyCol}>
+                      <Text style={styles.strategyLabel}>Strike</Text>
+                      <Text style={styles.strategyValue}>{opt.strike} {opt.option_type}</Text>
+                    </View>
+                    <View style={styles.strategyCol}>
+                      <Text style={styles.strategyLabel}>Premium</Text>
+                      <Text style={styles.strategyValue}>₹{opt.premium}</Text>
+                    </View>
+                    <View style={styles.strategyCol}>
+                      <Text style={styles.strategyLabel}>Cost</Text>
+                      <Text style={styles.strategyValue}>₹{opt.total_cost.toLocaleString("en-IN")}</Text>
+                    </View>
+                  </View>
 
-            {/* Summary Row */}
-            <View style={styles.optSummaryRow}>
-              <View style={styles.optSummaryItem}>
-                <Text style={styles.optSummaryLabel}>MAX RISK</Text>
-                <Text style={[styles.optSummaryValue, { color: colors.loss }]}>
-                  ₹{selected.option_suggestion.max_loss.toLocaleString("en-IN")}
-                </Text>
+                  <View style={styles.strategyRow}>
+                    <View style={styles.strategyCol}>
+                      <Text style={styles.strategyLabel}>Max Loss</Text>
+                      <Text style={[styles.strategyValue, { color: colors.loss }]}>₹{opt.max_loss.toLocaleString("en-IN")}</Text>
+                    </View>
+                    <View style={styles.strategyCol}>
+                      <Text style={styles.strategyLabel}>Breakeven</Text>
+                      <Text style={styles.strategyValue}>₹{opt.breakeven.toLocaleString("en-IN")}</Text>
+                    </View>
+                    <View style={styles.strategyCol}>
+                      <Text style={styles.strategyLabel}>Target</Text>
+                      <Text style={[styles.strategyValue, { color: colors.profit }]}>₹{opt.target}</Text>
+                    </View>
+                  </View>
+
+                  {opt.legs.length > 1 && (
+                    <View style={styles.legsContainer}>
+                      <Text style={styles.legsTitle}>Legs:</Text>
+                      {opt.legs.map((leg, legIdx) => (
+                        <Text key={legIdx} style={styles.legText}>
+                          {leg.action} {leg.strike} {leg.type} @ ₹{leg.premium}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+
+                  <Text style={styles.strategyNote}>{opt.note}</Text>
+                </View>
               </View>
-              <View style={styles.optSummaryItem}>
-                <Text style={styles.optSummaryLabel}>BREAKEVEN</Text>
-                <Text style={styles.optSummaryValue}>
-                  ₹{selected.option_suggestion.breakeven.toLocaleString("en-IN")}
-                </Text>
-              </View>
-              <View style={[styles.optSummaryItem, { 
-                backgroundColor: selected.option_suggestion.confidence === "HIGH" ? colors.profit + "15" : colors.warning + "15" 
-              }]}>
-                <Text style={styles.optSummaryLabel}>CONFIDENCE</Text>
-                <Text style={[styles.optSummaryValue, { 
-                  color: selected.option_suggestion.confidence === "HIGH" ? colors.profit : colors.warning 
-                }]}>
-                  {selected.option_suggestion.confidence}
-                </Text>
-              </View>
-            </View>
+            ))}
 
             <View style={styles.optNote}>
               <AlertTriangle color={colors.warning} size={12} />
-              <Text style={styles.optNoteText}>{selected.option_suggestion.expiry_note}</Text>
+              <Text style={styles.optNoteText}>Weekly expiry recommended for intraday/short-term trading</Text>
             </View>
           </View>
         )}
@@ -954,5 +953,105 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 10,
     fontStyle: "italic",
+  },
+
+  // Strategy Card Styles
+  strategyCard: {
+    backgroundColor: colors.bg,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  strategyCardRecommended: {
+    borderColor: colors.profit + "66",
+    backgroundColor: colors.profit + "08",
+  },
+  strategyHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  strategyHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  strategyName: {
+    color: colors.text,
+    fontFamily: fonts.bodySemi,
+    fontSize: 13,
+  },
+  recommendedBadge: {
+    backgroundColor: colors.profit + "22",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  recommendedText: {
+    color: colors.profit,
+    fontFamily: fonts.mono,
+    fontSize: 8,
+    letterSpacing: 0.5,
+  },
+  riskBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  riskText: {
+    fontFamily: fonts.bodySemi,
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  strategyDetails: {
+    gap: 8,
+  },
+  strategyRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  strategyCol: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderRadius: 6,
+    padding: 8,
+    alignItems: "center",
+  },
+  strategyLabel: {
+    color: colors.textMuted,
+    fontFamily: fonts.body,
+    fontSize: 9,
+  },
+  strategyValue: {
+    color: colors.text,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  legsContainer: {
+    backgroundColor: colors.surface,
+    borderRadius: 6,
+    padding: 8,
+  },
+  legsTitle: {
+    color: colors.textMuted,
+    fontFamily: fonts.bodySemi,
+    fontSize: 9,
+    marginBottom: 4,
+  },
+  legText: {
+    color: colors.text,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+  },
+  strategyNote: {
+    color: colors.textSecondary,
+    fontFamily: fonts.body,
+    fontSize: 10,
+    fontStyle: "italic",
+    marginTop: 4,
   },
 });
