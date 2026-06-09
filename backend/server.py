@@ -139,6 +139,7 @@ def fetch_quote(symbol: str) -> dict:
     try:
         t = yf.Ticker(symbol)
         hist = t.history(period="5d", interval="1d")
+        hist = hist.dropna(subset=["Close"]) if not hist.empty else hist
         if hist.empty:
             raise ValueError("no data")
         last = float(hist["Close"].iloc[-1])

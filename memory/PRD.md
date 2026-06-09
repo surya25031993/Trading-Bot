@@ -1,39 +1,40 @@
-# Algo Trading Bot — PRD
+# Algo & ML Trading Prediction App — PRD
 
-## Overview
-Mobile-first algo trading bot for Indian stock market (NSE/BSE). Paper trading + multi-algorithm signals + AI analysis. Built fully on-phone deployable (Emergent Publish), no laptop required.
+## Original problem statement
+"Fix my repo ui is not working properly" — algo + ML-based prediction app (Indian markets: NSE/BSE). Frontend (Expo Web) was failing to start and backend was crashing on import, leaving the UI unusable.
 
-## Stack
-- **Backend**: FastAPI + MongoDB
-- **Data**: yfinance (free Yahoo Finance — supports NSE `.NS` and BSE `.BO` symbols, no API key)
-- **AI**: Claude Sonnet 4.6 via Emergent LLM key (streaming SSE)
-- **Frontend**: Expo Router + React Native (Android/iOS/Web)
-- **Theme**: Dark "Performance Pro" trading theme (Outfit / IBM Plex Sans / JetBrains Mono)
+## Architecture
+- Frontend: Expo (React Native Web) + expo-router, served as a static web export on port 3000 (`serve dist --single`).
+- Backend: FastAPI (uvicorn) on port 8001, MongoDB (motor), yfinance, scikit-learn, xgboost, fyers-apiv3, emergentintegrations.
+- DB: MongoDB local.
 
-## Features (Shipped)
-- **Market tab** — live NIFTY 50, SENSEX, BANK NIFTY indices + 20 popular stocks (Reliance, TCS, HDFC, Infy, etc.)
-- **Signals tab** — scans all stocks, ranks BUY/SELL/HOLD using 5 algorithms (SMA 20/50 crossover, EMA 12/26 crossover, RSI 14, MACD, Bollinger Bands). Filter chips ALL/BUY/SELL/HOLD.
-- **Options tab** — NIFTY / SENSEX / BANKNIFTY index switcher. Auto-recommends an option strategy (Long Call, Long Put, Bull/Bear Spread, Iron Condor, Long Straddle, Short Strangle) based on the index's technical view. Shows concrete legs with ATM/OTM strikes, Black-Scholes premium estimates, Greeks (Δ Γ Θ V), payoff diagram with breakevens, Max Profit/Loss and Probability of Profit %.
-- **Watchlist tab** — add/remove tracked stocks with live quotes; search modal
-- **Portfolio tab** — paper portfolio starting at ₹10,00,000; cash, invested, current value, holdings with P&L %, reset button
-- **History tab** — full trade history (BUY/SELL tag, qty, price, timestamp)
-- **Stock detail screen** — 60-day price chart (SVG), all 5 algo signals with reasoning, indicator grid (RSI/MACD/SMA/BB), BUY/SELL action buttons with quantity modal, **AI Analysis** ("Run" button streams Claude's technical view)
+## What was broken & fixed (2026-06-09)
+1. **Frontend crash loop (ENOSPC: too many file watchers).** Metro's FallbackWatcher exhausted `fs.inotify.max_user_watches` (12288, cannot be raised in the container). Watchman also fails for the same reason.
+   - Fix: switched `yarn start` to serve a prebuilt static export — `expo export --platform web` → `serve dist -l tcp://0.0.0.0:3000 --single`. Added `dev` and `build:web` scripts.
+2. **Backend startup ModuleNotFoundError chain.** Missing deps for yfinance, sklearn, fyers-apiv3.
+   - Installed: `pytz multitasking peewee beautifulsoup4 frozendict curl_cffi scipy joblib threadpoolctl narwhals aws_lambda_powertools`.
+3. **Backend missing `/app/backend/.env`.** `KeyError: 'MONGO_URL'`, `EMERGENT_LLM_KEY`.
+   - Created `.env` with `MONGO_URL`, `DB_NAME=algo_ml_app`, `EMERGENT_LLM_KEY`, `CORS_ORIGINS=*`.
+4. **Frontend `EXPO_PUBLIC_BACKEND_URL` undefined** → all API calls hit `undefined/api/...`.
+   - Created `/app/frontend/.env` and rebuilt with cleared metro cache; URL now baked into the bundle.
+5. **`/api/stocks/popular` → 500 "Out of range float values are not JSON compliant"** (yfinance returning a half-formed NaN row for the current trading day).
+   - `fetch_quote()` now `hist.dropna(subset=["Close"])` before reading the last close.
 
-## API Endpoints
-- Stocks: `GET /api/market/indices` · `/stocks/popular` · `/stocks/search` · `/stocks/{symbol}` · `/stocks/{symbol}/signals` · `/signals/top`
-- Watchlist: `GET/POST/DELETE /api/watchlist`
-- Trades: `POST /api/trades/paper` · `GET /api/trades`
-- Portfolio: `GET /api/portfolio` · `POST /api/portfolio/reset`
-- AI: `POST /api/ai/analyze` (streams text)
-- **Options: `GET /api/options/strategies` · `/options/suggest?index=` · `POST /api/options/calculate` · `GET /api/options/chain?index=` (best-effort NSE)**
-- **Fyers Broker: `GET /api/fyers/status` · `/login-url` · `/callback` · `POST /api/fyers/disconnect` · `GET /api/fyers/{profile,funds,holdings,positions,option-chain}` · `POST /api/fyers/orders` (live_mode safety toggle)**
+## How to develop (important note for future iterations)
+Hot reload (`expo start`) cannot run in this container because of the inotify limit.
+- After ANY change in `/app/frontend/app/**` or `/app/frontend/src/**`, run:
+  ```
+  cd /app/frontend && yarn build:web && sudo supervisorctl restart frontend
+  ```
+- Backend has uvicorn `--reload` so backend changes apply automatically.
 
-## Important Notes
-- All trades are PAPER (simulated). No real broker connected — no broker API key was provided.
-- Yahoo Finance data is typically delayed 15 minutes during market hours; some symbols (rarely) return "Data unavailable" — backend degrades gracefully.
-- "Profit" is never guaranteed. The app surfaces signals; user decides.
+## What's working
+- Markets dashboard (Indian Markets header, NIFTY 50 / SENSEX / BANK NIFTY indices, Popular Stocks list with live prices, change %, volume).
+- Bottom tab navigation: Market, ML Predict, Signals, Options, Watchlist, Portfolio, Bot.
+- Backend `/api/`, `/api/market/indices`, `/api/stocks/popular`, `/api/stocks/{symbol}` returning data.
 
-## Future Hooks
-- Plug in Zerodha Kite / Upstox / Angel One Smart API for real orders (only needs auth + 1 endpoint swap in `place_paper_trade`).
-- Add price alerts and scheduled scans.
-- Add candlestick charts and intraday intervals.
+## Backlog / Next actions
+- P1: Verify each tab (ML Predict, Signals, Options, Watchlist, Portfolio, Bot) end-to-end via testing agent.
+- P1: Add a dev-mode option (e.g., `expo export --dev` watch-rebuild loop) so iteration doesn't require manual rebuilds.
+- P2: Pin requirements.txt to the actually-installed transitive deps (pytz, scipy, joblib, threadpoolctl, narwhals, multitasking, peewee, beautifulsoup4, frozendict, curl_cffi, aws_lambda_powertools) so the env is reproducible.
+- P2: Harden `fetch_quote`/other yfinance callers against NaN across all downstream endpoints (signals, history, ML predict).

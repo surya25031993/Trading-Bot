@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "scripts": {
     "preinstall": "./scripts/check-pkg.js",
-    "start": "expo start",
+    "start": "serve dist -l tcp://0.0.0.0:3000 --single",
+    "dev": "expo start --web --port 3000",
+    "build:web": "expo export --platform web",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -57,6 +59,7 @@
     "@types/react": "~19.1.0",
     "eslint": "9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "serve": "^14.2.6",
     "typescript": "~5.9.3"
   },
   "private": true,
