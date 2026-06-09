@@ -5,12 +5,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { api, IndicatorData, Quote, Prediction, IntradayForecast } from "@/src/api";
+import { api, IndicatorData, Quote, Prediction, IntradayForecast, MLPrediction } from "@/src/api";
 import { colors, fonts, API } from "@/src/theme";
 import { LineChart } from "@/src/components/LineChart";
 import { AdvancedChart, ChartData } from "@/src/components/AdvancedChart";
 import { PredictionCard } from "@/src/components/PredictionCard";
 import { IntradayPredictionCard } from "@/src/components/IntradayPredictionCard";
+import { MLPredictionCard } from "@/src/components/MLPredictionCard";
 import { ArrowLeft, Sparkles, Star } from "lucide-react-native";
 
 type TradeSide = "BUY" | "SELL";
@@ -27,6 +28,7 @@ export default function StockDetail() {
   const [ind, setInd] = useState<IndicatorData | null>(null);
   const [pred, setPred] = useState<Prediction | null>(null);
   const [intra, setIntra] = useState<IntradayForecast | null>(null);
+  const [mlPred, setMlPred] = useState<MLPrediction | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [aiText, setAiText] = useState("");
@@ -39,12 +41,13 @@ export default function StockDetail() {
 
   const load = useCallback(async () => {
     try {
-      const [d, s, c, p, intraData] = await Promise.all([
+      const [d, s, c, p, intraData, mlData] = await Promise.all([
         api.stockDetail(symbol),
         api.stockSignals(symbol).catch(() => null),
         api.stockChart(symbol).catch(() => null),
         api.stockPredict(symbol).catch(() => null),
         api.stockIntradayForecast(symbol).catch(() => null),
+        api.stockMLPredict(symbol).catch(() => null),
       ]);
       setQuote(d.quote);
       setChart(d.chart.map((c) => ({ close: c.close })));
@@ -52,6 +55,7 @@ export default function StockDetail() {
       if (c) setAdvChart(c);
       if (p) setPred(p);
       if (intraData) setIntra(intraData);
+      if (mlData) setMlPred(mlData);
     } catch (e) {
       console.warn(e);
     } finally {
@@ -166,6 +170,9 @@ export default function StockDetail() {
 
         {/* === INTRADAY 5/10/15/30-min FORECAST + BACKTEST === */}
         {intra && <IntradayPredictionCard data={intra} symbol={symbol} onRefresh={setIntra} />}
+
+        {/* === ML PREDICTION SECTION (Separate) === */}
+        {mlPred && <MLPredictionCard data={mlPred} symbol={symbol} onRefresh={setMlPred} />}
 
         {ind && (
           <View style={styles.card}>

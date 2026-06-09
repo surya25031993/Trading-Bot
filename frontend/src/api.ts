@@ -153,6 +153,7 @@ export const api = {
   stockChart: (sym: string) => req<any>(`/stocks/${encodeURIComponent(sym)}/chart`),
   stockPredict: (sym: string) => req<Prediction>(`/stocks/${encodeURIComponent(sym)}/predict`),
   stockIntradayForecast: (sym: string) => req<IntradayForecast>(`/stocks/${encodeURIComponent(sym)}/intraday-forecast`),
+  stockMLPredict: (sym: string) => req<MLPrediction>(`/stocks/${encodeURIComponent(sym)}/ml-predict`),
 
   // ============ Bot ============
   botStatus: () => req<any>("/bot/status"),
@@ -180,5 +181,28 @@ export type OptionSuggestion = {
   consensus: "BUY" | "SELL" | "HOLD"; rsi: number; change_pct: number;
   strategy: { key: string; name: string; view: string; risk: string; reward: string; description: string };
   concrete_legs: { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium_est: number; qty: number }[];
+  note: string;
+};
+
+// ML Prediction types
+export type MLPredictionItem = {
+  label: string;
+  bars: number;
+  direction: "UP" | "DOWN" | "NEUTRAL" | "N/A";
+  confidence: number;
+  reason: string;
+  model_votes: { xgb?: string; rf?: string; gb?: string };
+  training: { samples: number; best_model: string };
+  backtest_accuracy: number;
+};
+
+export type MLPrediction = {
+  symbol: string;
+  model_type: string;
+  current_price: number;
+  as_of: string;
+  ml_direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  predictions: MLPredictionItem[];
+  overall_ml_accuracy: number;
   note: string;
 };

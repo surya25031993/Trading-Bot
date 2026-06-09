@@ -16,6 +16,14 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
+# ML imports for prediction
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import TimeSeriesSplit
+import xgboost as xgb
+import warnings
+warnings.filterwarnings('ignore')
+
 from emergentintegrations.llm.chat import LlmChat, UserMessage, TextDelta, StreamDone
 
 from options import (
@@ -1455,6 +1463,312 @@ async def stock_intraday_forecast(symbol: str):
         "indicator_accuracy": horizon_indicator_acc.get("5 min", {}),  # Per-indicator hit-rate on 5-min horizon
         "total_indicators": len(SIGNAL_COLS_V2),
     }
+
+
+
+# ==================== ML-BASED PREDICTION SECTION ====================
+# Separate ML prediction system using ensemble learning for higher accuracy
+
+class MLPredictor:
+    """
+    Machine Learning Predictor using ensemble of XGBoost, Random Forest, and Gradient Boosting.
+    Trained on indicator signals to predict price direction.
+    """
+    
+    def __init__(self):
+        self.models = {}
+        self.scalers = {}
+        self.feature_cols = SIGNAL_COLS_V2 + ["adx", "rsi", "atr_pct"]
+        
+    def prepare_features(self, votes_df: pd.DataFrame) -> pd.DataFrame:
+        """Prepare feature matrix from indicator votes."""
+        features = pd.DataFrame(index=votes_df.index)
+        
+        # Indicator signals
+        for col in SIGNAL_COLS_V2:
+            if col in votes_df.columns:
+                features[col] = votes_df[col].fillna(0)
+        
+        # Additional features
+        if "adx" in votes_df.columns:
+            features["adx"] = votes_df["adx"].fillna(20)
+        if "rsi" in votes_df.columns:
+            features["rsi"] = votes_df["rsi"].fillna(50)
+        if "atr_pct" in votes_df.columns:
+            features["atr_pct"] = votes_df["atr_pct"].fillna(0.1)
+        
+        # Derived features
+        features["bull_count"] = votes_df.get("buy_count", 0)
+        features["bear_count"] = votes_df.get("sell_count", 0)
+        features["net_score"] = votes_df.get("net_score", 0)
+        
+        # Momentum features (rolling)
+        if "close" in votes_df.columns:
+            close = votes_df["close"]
+            features["ret_1"] = close.pct_change(1).fillna(0)
+            features["ret_3"] = close.pct_change(3).fillna(0)
+            features["ret_5"] = close.pct_change(5).fillna(0)
+            features["vol_5"] = close.pct_change().rolling(5).std().fillna(0)
+        
+        return features.fillna(0)
+    
+    def train(self, votes_df: pd.DataFrame, horizon_bars: int = 1) -> dict:
+        """Train ML models on historical data using walk-forward validation."""
+        if len(votes_df) < 100:
+            return {"error": "Insufficient data for ML training"}
+        
+        features = self.prepare_features(votes_df)
+        close = votes_df["close"]
+        
+        # Create target: 1 if price goes up, 0 if down/flat (binary classification)
+        future_ret = close.shift(-horizon_bars) / close - 1
+        # Binary: 1 = UP, 0 = DOWN/FLAT
+        target = (future_ret > 0.0002).astype(int)
+        
+        # Remove rows with NaN
+        valid_mask = ~(features.isna().any(axis=1) | target.isna())
+        X = features[valid_mask].values
+        y = target[valid_mask].values
+        
+        if len(X) < 80:
+            return {"error": "Insufficient valid samples"}
+        
+        # Time series split for walk-forward validation
+        tscv = TimeSeriesSplit(n_splits=3)
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        self.scalers[horizon_bars] = scaler
+        
+        # Train ensemble of models
+        models = {
+            "xgb": xgb.XGBClassifier(
+                n_estimators=50, max_depth=4, learning_rate=0.1,
+                eval_metric='logloss', random_state=42, verbosity=0,
+                use_label_encoder=False
+            ),
+            "rf": RandomForestClassifier(
+                n_estimators=50, max_depth=5, random_state=42, n_jobs=-1
+            ),
+            "gb": GradientBoostingClassifier(
+                n_estimators=50, max_depth=3, learning_rate=0.1, random_state=42
+            )
+        }
+        
+        # Walk-forward validation scores
+        val_scores = {name: [] for name in models}
+        
+        for train_idx, val_idx in tscv.split(X_scaled):
+            X_train, X_val = X_scaled[train_idx], X_scaled[val_idx]
+            y_train, y_val = y[train_idx], y[val_idx]
+            
+            for name, model in models.items():
+                try:
+                    model.fit(X_train, y_train)
+                    pred = model.predict(X_val)
+                    acc = (pred == y_val).mean()
+                    val_scores[name].append(acc)
+                except Exception as e:
+                    logger.warning(f"Model {name} training error: {e}")
+        
+        # Final training on all data
+        for name, model in models.items():
+            try:
+                model.fit(X_scaled, y)
+            except Exception as e:
+                logger.warning(f"Final training error for {name}: {e}")
+        
+        self.models[horizon_bars] = models
+        
+        # Calculate average validation accuracy
+        avg_scores = {name: np.mean(scores) if scores else 0.5 for name, scores in val_scores.items()}
+        
+        return {
+            "status": "trained",
+            "samples": len(X),
+            "validation_accuracy": avg_scores,
+            "best_model": max(avg_scores, key=avg_scores.get),
+        }
+    
+    def predict(self, votes_df: pd.DataFrame, horizon_bars: int = 1) -> dict:
+        """Make prediction using ensemble of trained models."""
+        if horizon_bars not in self.models:
+            return {"direction": 0, "confidence": 0, "reason": "Model not trained"}
+        
+        features = self.prepare_features(votes_df)
+        last_features = features.iloc[-1:].values
+        
+        scaler = self.scalers.get(horizon_bars)
+        if scaler:
+            last_features = scaler.transform(last_features)
+        
+        # Get predictions from all models
+        predictions = {}
+        probabilities = {}
+        
+        for name, model in self.models[horizon_bars].items():
+            try:
+                pred = int(model.predict(last_features)[0])  # Convert to Python int
+                predictions[name] = pred
+                
+                # Get probability if available
+                if hasattr(model, "predict_proba"):
+                    proba = model.predict_proba(last_features)[0]
+                    probabilities[name] = float(max(proba))  # Convert to Python float
+            except Exception as e:
+                logger.warning(f"Prediction error for {name}: {e}")
+        
+        # Ensemble voting with confidence (binary: 1=UP, 0=DOWN)
+        votes = list(predictions.values())
+        up_votes = votes.count(1)
+        down_votes = votes.count(0)
+        
+        # Majority vote
+        if up_votes >= 2:
+            direction = 1
+            confidence = int(up_votes / 3 * 100)
+            reason = f"ML Ensemble: {up_votes}/3 models predict UP"
+        elif down_votes >= 2:
+            direction = -1
+            confidence = int(down_votes / 3 * 100)
+            reason = f"ML Ensemble: {down_votes}/3 models predict DOWN"
+        else:
+            direction = 0
+            confidence = 50
+            reason = "ML Ensemble: Mixed signals"
+        
+        # Boost confidence if all models agree
+        if up_votes == 3 or down_votes == 3:
+            confidence = min(95, confidence + 20)
+            reason += " (unanimous)"
+        
+        return {
+            "direction": direction,
+            "confidence": confidence,
+            "reason": reason,
+            "model_votes": {k: ("UP" if v == 1 else "DOWN") for k, v in predictions.items()},
+            "probabilities": {k: round(v, 3) for k, v in probabilities.items()} if probabilities else {},
+        }
+
+
+# Global ML predictor instance cache (per symbol)
+_ml_predictors: dict = {}
+
+
+@api_router.get("/stocks/{symbol}/ml-predict")
+async def stock_ml_prediction(symbol: str):
+    """
+    ML-BASED PREDICTION ENDPOINT
+    
+    Uses ensemble of XGBoost, Random Forest, and Gradient Boosting models
+    trained on indicator signals to predict price direction.
+    
+    Returns predictions for 5, 10, 15, 30 minute horizons with backtest accuracy.
+    """
+    try:
+        # Fetch 5-minute data
+        df = await asyncio.to_thread(fetch_history, symbol, "5d", "5m")
+        if df.empty or len(df) < 100:
+            raise HTTPException(status_code=400, detail="Insufficient data for ML prediction")
+        
+        # Compute indicators
+        votes = _compute_signal_votes(df, include_aggregate=True)
+        if votes.empty:
+            raise HTTPException(status_code=400, detail="Failed to compute indicators")
+        
+        # Initialize or get cached predictor
+        if symbol not in _ml_predictors:
+            _ml_predictors[symbol] = MLPredictor()
+        
+        predictor = _ml_predictors[symbol]
+        
+        # Horizons: 5, 10, 15, 30 minutes
+        horizons = [
+            {"label": "5 min", "bars": 1},
+            {"label": "10 min", "bars": 2},
+            {"label": "15 min", "bars": 3},
+            {"label": "30 min", "bars": 6},
+        ]
+        
+        results = []
+        overall_accuracy = []
+        
+        for h in horizons:
+            # Train model
+            train_result = predictor.train(votes, h["bars"])
+            
+            if "error" in train_result:
+                results.append({
+                    "label": h["label"],
+                    "bars": h["bars"],
+                    "direction": "N/A",
+                    "confidence": 0,
+                    "reason": train_result["error"],
+                    "training": train_result,
+                    "backtest_accuracy": 0,
+                })
+                continue
+            
+            # Make prediction
+            pred = predictor.predict(votes, h["bars"])
+            
+            # Get validation accuracy from training
+            val_acc = train_result.get("validation_accuracy", {})
+            avg_acc = np.mean(list(val_acc.values())) * 100 if val_acc else 50
+            
+            direction_str = "UP" if pred["direction"] == 1 else "DOWN" if pred["direction"] == -1 else "NEUTRAL"
+            
+            results.append({
+                "label": h["label"],
+                "bars": h["bars"],
+                "direction": direction_str,
+                "confidence": pred["confidence"],
+                "reason": pred["reason"],
+                "model_votes": pred.get("model_votes", {}),
+                "training": {
+                    "samples": train_result.get("samples", 0),
+                    "best_model": train_result.get("best_model", ""),
+                },
+                "backtest_accuracy": round(avg_acc, 1),
+            })
+            
+            if avg_acc > 0:
+                overall_accuracy.append(avg_acc)
+        
+        # Current price and timestamp
+        spot = float(df["Close"].iloc[-1])
+        last_ts = df.index[-1]
+        last_ts_str = last_ts.strftime("%Y-%m-%d %H:%M") if hasattr(last_ts, "strftime") else str(last_ts)
+        
+        # Overall direction from ML
+        up_votes = sum(1 for r in results if r["direction"] == "UP")
+        down_votes = sum(1 for r in results if r["direction"] == "DOWN")
+        
+        if up_votes > down_votes:
+            ml_direction = "BULLISH"
+        elif down_votes > up_votes:
+            ml_direction = "BEARISH"
+        else:
+            ml_direction = "NEUTRAL"
+        
+        return {
+            "symbol": symbol,
+            "model_type": "ML Ensemble (XGBoost + RandomForest + GradientBoosting)",
+            "current_price": round(spot, 2),
+            "as_of": last_ts_str,
+            "ml_direction": ml_direction,
+            "predictions": results,
+            "overall_ml_accuracy": round(np.mean(overall_accuracy), 1) if overall_accuracy else 0,
+            "note": "ML predictions are trained on recent 5-day data with walk-forward validation",
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"ML prediction error for {symbol}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 
