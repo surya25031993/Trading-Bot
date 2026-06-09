@@ -782,9 +782,39 @@ async def root():
 @api_router.get("/market/indices")
 async def market_indices():
     out = []
+    # Try Fyers for all indices in one batch call if connected (live intraday data)
+    fyers_quotes: dict = {}
+    try:
+        fyers_client = await fyers_int.get_client(db)
+        if fyers_client:
+            yf_to_fyers = {"^NSEI": "NIFTY", "^BSESN": "SENSEX", "^NSEBANK": "BANKNIFTY"}
+            fyers_syms = [fyers_int.INDEX_SYMBOL[yf_to_fyers[i["symbol"]]] for i in INDICES if i["symbol"] in yf_to_fyers]
+            quotes = await asyncio.to_thread(fyers_int.fetch_quotes_sync, fyers_client, fyers_syms)
+            reverse = {fyers_int.INDEX_SYMBOL[v]: k for k, v in yf_to_fyers.items()}
+            for q in quotes:
+                yf_sym = reverse.get(q["symbol"])
+                if yf_sym:
+                    fyers_quotes[yf_sym] = q
+    except Exception as e:
+        logger.warning(f"Fyers indices quote failed: {e}")
+
     for idx in INDICES:
-        q = await asyncio.to_thread(fetch_quote, idx["symbol"])
-        out.append({**idx, **q})
+        if idx["symbol"] in fyers_quotes:
+            fq = fyers_quotes[idx["symbol"]]
+            out.append({
+                **idx,
+                "symbol": idx["symbol"],
+                "price": round(float(fq.get("price", 0)), 2),
+                "change": round(float(fq.get("change", 0)), 2),
+                "change_pct": round(float(fq.get("change_pct", 0)), 2),
+                "volume": int(fq.get("volume", 0) or 0),
+                "day_high": round(float(fq.get("day_high", 0)), 2),
+                "day_low": round(float(fq.get("day_low", 0)), 2),
+                "source": "fyers",
+            })
+        else:
+            q = await asyncio.to_thread(fetch_quote, idx["symbol"])
+            out.append({**idx, **q, "source": "yfinance"})
     return out
 
 
@@ -2867,6 +2897,25 @@ async def options_suggest(index: str = "NIFTY"):
     ind = await asyncio.to_thread(compute_indicators, df)
     if "error" in ind:
         raise HTTPException(status_code=503, detail=ind["error"])
+
+    # Prefer Fyers live spot + change when connected (real-time intraday); fall back to yfinance.
+    live_source = "yfinance"
+    try:
+        fyers_client = await fyers_int.get_client(db)
+        if fyers_client:
+            fyers_sym = fyers_int.INDEX_SYMBOL.get(index.upper())
+            if fyers_sym:
+                quotes = await asyncio.to_thread(fyers_int.fetch_quotes_sync, fyers_client, [fyers_sym])
+                if quotes:
+                    fq = quotes[0]
+                    if fq.get("price"):
+                        q["price"] = float(fq["price"])
+                    if fq.get("change_pct") is not None:
+                        q["change_pct"] = float(fq["change_pct"])
+                    live_source = "fyers"
+    except Exception as e:
+        logger.warning(f"Fyers live spot lookup failed for {index}: {e}")
+
     strat = suggest_strategy(ind["consensus"], ind["indicators"]["rsi"], q["change_pct"])
     # Build concrete legs with strike numbers around ATM (rounded to 50 for NIFTY, 100 for BANKNIFTY, 100 for SENSEX)
     spot = q["price"]
@@ -2890,6 +2939,7 @@ async def options_suggest(index: str = "NIFTY"):
         "consensus": ind["consensus"],
         "rsi": ind["indicators"]["rsi"],
         "change_pct": q["change_pct"],
+        "live_source": live_source,
         "strategy": strat,
         "concrete_legs": concrete_legs,
         "note": "Premium estimates use Black-Scholes (15% IV, weekly expiry). Use NSE option chain for live prices.",
