@@ -2223,15 +2223,30 @@ async def _compute_ml_prediction(symbol: str) -> dict:
     
     # Determine if this is an index (options tradeable)
     index_map = {
-        "^NSEI": {"name": "NIFTY", "lot_size": 75, "strike_gap": 50},
-        "^NSEBANK": {"name": "BANKNIFTY", "lot_size": 35, "strike_gap": 100},
-        "^BSESN": {"name": "SENSEX", "lot_size": 20, "strike_gap": 100},
+        "^NSEI": {"name": "NIFTY", "lot_size": 75, "strike_gap": 50, "expiry_day": 3},  # Thursday
+        "^NSEBANK": {"name": "BANKNIFTY", "lot_size": 35, "strike_gap": 100, "expiry_day": 2},  # Wednesday
+        "^BSESN": {"name": "SENSEX", "lot_size": 20, "strike_gap": 100, "expiry_day": 4},  # Friday
     }
     
     if symbol in index_map and ml_direction != "NEUTRAL":
         idx_info = index_map[symbol]
         strike_gap = idx_info["strike_gap"]
         lot_size = idx_info["lot_size"]
+        expiry_weekday = idx_info["expiry_day"]  # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
+        
+        # Calculate next weekly expiry date
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        days_until_expiry = (expiry_weekday - today.weekday()) % 7
+        if days_until_expiry == 0 and today.hour >= 15:  # If today is expiry and market closed
+            days_until_expiry = 7
+        if days_until_expiry == 0:
+            days_until_expiry = 7  # Next week if today is expiry
+        
+        next_expiry = today + timedelta(days=days_until_expiry)
+        expiry_date_str = next_expiry.strftime("%d %b %Y")
+        expiry_date_short = next_expiry.strftime("%d%b").upper()
+        days_to_expiry = max(1, days_until_expiry)
         
         # Calculate ATM strike (rounded to nearest strike gap)
         atm_strike = round(spot / strike_gap) * strike_gap
@@ -2239,9 +2254,9 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         otm_strike = atm_strike + strike_gap if ml_direction == "BULLISH" else atm_strike - strike_gap
         otm2_strike = atm_strike + (2 * strike_gap) if ml_direction == "BULLISH" else atm_strike - (2 * strike_gap)
         
-        # Estimate IV and days to expiry for premium calculation
-        iv = 0.15  # 15% implied volatility estimate
-        days_to_expiry = 5  # Assume weekly expiry
+        # Estimate IV based on days to expiry (higher IV for shorter expiry)
+        base_iv = 0.12 if days_to_expiry > 5 else 0.15 if days_to_expiry > 2 else 0.18
+        iv = base_iv
         T = days_to_expiry / 365
         r = 0.07  # Risk-free rate
         
@@ -2262,11 +2277,20 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             return round(strike_price * np.exp(-r * T) * norm.cdf(-d2) - spot * norm.cdf(-d1), 2)
         
         if ml_direction == "BULLISH":
+            # Common expiry info for all strategies
+            expiry_info = {
+                "expiry_date": expiry_date_str,
+                "expiry_short": expiry_date_short,
+                "days_to_expiry": days_to_expiry,
+                "index": idx_info["name"],
+            }
+            
             # Strategy 1: Long Call (ATM)
             atm_ce_premium = calc_call_premium(atm_strike)
             option_suggestions.append({
                 "strategy_id": 1,
                 "strategy": "Long Call",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(atm_strike)} CE",
                 "type": "DIRECTIONAL",
                 "risk_level": "MODERATE",
                 "option_type": "CE",
@@ -2281,6 +2305,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                 "target": round(float(atm_ce_premium * 2), 2),
                 "legs": [{"action": "BUY", "type": "CE", "strike": int(atm_strike), "premium": float(atm_ce_premium)}],
                 "note": "Simple bullish bet - buy ATM Call",
+                **expiry_info,
             })
             
             # Strategy 2: OTM Call (Cheaper, Higher Risk)
@@ -2288,6 +2313,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             option_suggestions.append({
                 "strategy_id": 2,
                 "strategy": "Long OTM Call",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(otm_strike)} CE",
                 "type": "AGGRESSIVE",
                 "risk_level": "HIGH",
                 "option_type": "CE",
@@ -2302,6 +2328,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                 "target": round(float(otm_ce_premium * 3), 2),
                 "legs": [{"action": "BUY", "type": "CE", "strike": int(otm_strike), "premium": float(otm_ce_premium)}],
                 "note": "Cheaper entry, needs bigger move to profit",
+                **expiry_info,
             })
             
             # Strategy 3: Bull Call Spread (Limited Risk)
@@ -2310,6 +2337,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             option_suggestions.append({
                 "strategy_id": 3,
                 "strategy": "Bull Call Spread",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(atm_strike)}-{int(otm_strike)} CE",
                 "type": "CONSERVATIVE",
                 "risk_level": "LOW",
                 "option_type": "CE",
@@ -2327,6 +2355,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                     {"action": "SELL", "type": "CE", "strike": int(otm_strike), "premium": float(otm_ce_sell_premium)},
                 ],
                 "note": "Limited risk & reward - good for uncertain markets",
+                **expiry_info,
             })
             
             # Strategy 4: ITM Call (Higher Delta, Safer)
@@ -2334,6 +2363,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             option_suggestions.append({
                 "strategy_id": 4,
                 "strategy": "Long ITM Call",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(itm_strike)} CE",
                 "type": "CONSERVATIVE",
                 "risk_level": "LOW",
                 "option_type": "CE",
@@ -2348,14 +2378,24 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                 "target": round(float(itm_ce_premium * 1.5), 2),
                 "legs": [{"action": "BUY", "type": "CE", "strike": int(itm_strike), "premium": float(itm_ce_premium)}],
                 "note": "Higher premium but moves more with underlying",
+                **expiry_info,
             })
             
         else:  # BEARISH
+            # Common expiry info for all strategies
+            expiry_info = {
+                "expiry_date": expiry_date_str,
+                "expiry_short": expiry_date_short,
+                "days_to_expiry": days_to_expiry,
+                "index": idx_info["name"],
+            }
+            
             # Strategy 1: Long Put (ATM)
             atm_pe_premium = calc_put_premium(atm_strike)
             option_suggestions.append({
                 "strategy_id": 1,
                 "strategy": "Long Put",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(atm_strike)} PE",
                 "type": "DIRECTIONAL",
                 "risk_level": "MODERATE",
                 "option_type": "PE",
@@ -2370,6 +2410,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                 "target": round(float(atm_pe_premium * 2), 2),
                 "legs": [{"action": "BUY", "type": "PE", "strike": int(atm_strike), "premium": float(atm_pe_premium)}],
                 "note": "Simple bearish bet - buy ATM Put",
+                **expiry_info,
             })
             
             # Strategy 2: OTM Put (Cheaper, Higher Risk)
@@ -2377,6 +2418,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             option_suggestions.append({
                 "strategy_id": 2,
                 "strategy": "Long OTM Put",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(otm_strike)} PE",
                 "type": "AGGRESSIVE",
                 "risk_level": "HIGH",
                 "option_type": "PE",
@@ -2391,6 +2433,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                 "target": round(float(otm_pe_premium * 3), 2),
                 "legs": [{"action": "BUY", "type": "PE", "strike": int(otm_strike), "premium": float(otm_pe_premium)}],
                 "note": "Cheaper entry, needs bigger move to profit",
+                **expiry_info,
             })
             
             # Strategy 3: Bear Put Spread (Limited Risk)
@@ -2399,6 +2442,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             option_suggestions.append({
                 "strategy_id": 3,
                 "strategy": "Bear Put Spread",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(atm_strike)}-{int(otm_strike)} PE",
                 "type": "CONSERVATIVE",
                 "risk_level": "LOW",
                 "option_type": "PE",
@@ -2416,6 +2460,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                     {"action": "SELL", "type": "PE", "strike": int(otm_strike), "premium": float(otm_pe_sell_premium)},
                 ],
                 "note": "Limited risk & reward - good for uncertain markets",
+                **expiry_info,
             })
             
             # Strategy 4: ITM Put (Higher Delta, Safer)
@@ -2423,6 +2468,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             option_suggestions.append({
                 "strategy_id": 4,
                 "strategy": "Long ITM Put",
+                "contract": f"{idx_info['name']} {expiry_date_short} {int(itm_strike)} PE",
                 "type": "CONSERVATIVE",
                 "risk_level": "LOW",
                 "option_type": "PE",
@@ -2437,6 +2483,7 @@ async def _compute_ml_prediction(symbol: str) -> dict:
                 "target": round(float(itm_pe_premium * 1.5), 2),
                 "legs": [{"action": "BUY", "type": "PE", "strike": int(itm_strike), "premium": float(itm_pe_premium)}],
                 "note": "Higher premium but moves more with underlying",
+                **expiry_info,
             })
         
         # Add recommendation based on confidence

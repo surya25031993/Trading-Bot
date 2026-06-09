@@ -256,6 +256,7 @@ export type OptionRiskManagement = {
 export type OptionSuggestionML = {
   strategy_id: number;
   strategy: string;
+  contract: string;
   type: string;
   risk_level: string;
   option_type: string;
@@ -271,6 +272,10 @@ export type OptionSuggestionML = {
   legs: OptionLegML[];
   note: string;
   recommended?: boolean;
+  expiry_date: string;
+  expiry_short: string;
+  days_to_expiry: number;
+  index: string;
 };
 
 export type MLPrediction = {

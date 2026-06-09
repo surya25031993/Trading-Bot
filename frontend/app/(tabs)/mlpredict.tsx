@@ -418,6 +418,12 @@ export default function MLPredictScreen() {
                   </View>
                 </View>
 
+                {/* Contract with Expiry */}
+                <View style={styles.contractRow}>
+                  <Text style={styles.contractText}>{opt.contract}</Text>
+                  <Text style={styles.expiryText}>Exp: {opt.days_to_expiry}d</Text>
+                </View>
+
                 <View style={styles.strategyDetails}>
                   <View style={styles.strategyRow}>
                     <View style={styles.strategyCol}>
@@ -973,6 +979,26 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontFamily: fonts.bodySemi,
     fontSize: 13,
+  },
+  contractRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 10,
+  },
+  contractText: {
+    color: colors.accent,
+    fontFamily: fonts.monoBold,
+    fontSize: 12,
+  },
+  expiryText: {
+    color: colors.warning,
+    fontFamily: fonts.mono,
+    fontSize: 10,
   },
   recommendedBadge: {
     backgroundColor: colors.profit + "22",
