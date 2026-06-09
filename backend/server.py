@@ -2222,8 +2222,12 @@ async def _compute_ml_prediction(symbol: str) -> dict:
     option_suggestions = []
     
     # Determine if this is an index (options tradeable)
+    # NSE Weekly Expiry Days (as of 2024):
+    # - NIFTY: Tuesday (changed from Thursday)
+    # - BANKNIFTY: Wednesday
+    # - SENSEX: Friday
     index_map = {
-        "^NSEI": {"name": "NIFTY", "lot_size": 75, "strike_gap": 50, "expiry_day": 3},  # Thursday
+        "^NSEI": {"name": "NIFTY", "lot_size": 75, "strike_gap": 50, "expiry_day": 1},  # Tuesday
         "^NSEBANK": {"name": "BANKNIFTY", "lot_size": 35, "strike_gap": 100, "expiry_day": 2},  # Wednesday
         "^BSESN": {"name": "SENSEX", "lot_size": 20, "strike_gap": 100, "expiry_day": 4},  # Friday
     }
@@ -2237,6 +2241,33 @@ async def _compute_ml_prediction(symbol: str) -> dict:
         # Calculate next weekly expiry date
         from datetime import datetime, timedelta
         today = datetime.now()
+        
+        # Indian market holidays in 2026 (approximate - expiry moves to previous trading day)
+        # When Thursday is a holiday, weekly expiry moves to previous Wednesday
+        indian_holidays_2026 = [
+            datetime(2026, 1, 26),  # Republic Day
+            datetime(2026, 3, 10),  # Holi
+            datetime(2026, 4, 2),   # Ram Navami
+            datetime(2026, 4, 6),   # Mahavir Jayanti
+            datetime(2026, 4, 10),  # Good Friday
+            datetime(2026, 4, 14),  # Ambedkar Jayanti
+            datetime(2026, 5, 1),   # May Day
+            datetime(2026, 5, 13),  # Buddha Purnima
+            datetime(2026, 6, 11),  # Eid ul-Adha (Bakri Eid)
+            datetime(2026, 6, 12),  # Eid ul-Adha Holiday
+            datetime(2026, 7, 10),  # Muharram
+            datetime(2026, 8, 15),  # Independence Day
+            datetime(2026, 9, 8),   # Milad un-Nabi
+            datetime(2026, 10, 2),  # Gandhi Jayanti
+            datetime(2026, 10, 20), # Dussehra
+            datetime(2026, 11, 9),  # Diwali (Laxmi Puja)
+            datetime(2026, 11, 10), # Diwali Balipratipada
+            datetime(2026, 11, 30), # Guru Nanak Jayanti
+            datetime(2026, 12, 25), # Christmas
+        ]
+        holiday_dates = set(h.date() for h in indian_holidays_2026)
+        
+        # Find next valid expiry (skip holidays)
         days_until_expiry = (expiry_weekday - today.weekday()) % 7
         if days_until_expiry == 0 and today.hour >= 15:  # If today is expiry and market closed
             days_until_expiry = 7
@@ -2244,6 +2275,12 @@ async def _compute_ml_prediction(symbol: str) -> dict:
             days_until_expiry = 7  # Next week if today is expiry
         
         next_expiry = today + timedelta(days=days_until_expiry)
+        
+        # Check if expiry falls on a holiday - if so, move to next week
+        while next_expiry.date() in holiday_dates or next_expiry.weekday() >= 5:  # Skip weekends too
+            next_expiry = next_expiry + timedelta(days=7)
+            days_until_expiry += 7
+        
         expiry_date_str = next_expiry.strftime("%d %b %Y")
         expiry_date_short = next_expiry.strftime("%d%b").upper()
         days_to_expiry = max(1, days_until_expiry)
