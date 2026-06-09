@@ -3150,6 +3150,51 @@ async def fyers_place_order(order: fyers_int.FyersOrderRequest, live_mode: bool 
     return result
 
 
+class BatchOrderRequest(BaseModel):
+    orders: List[fyers_int.FyersOrderRequest]
+
+
+@api_router.post("/fyers/orders-batch")
+async def fyers_place_batch(req: BatchOrderRequest, live_mode: bool = False):
+    """Place multiple real Fyers orders sequentially. Used by Options strategies (Iron Condor, etc.)."""
+    if not live_mode:
+        raise HTTPException(status_code=400, detail="SAFETY: Pass live_mode=true to place real orders.")
+    client = await fyers_int.get_client(db)
+    if not client:
+        raise HTTPException(status_code=401, detail="Fyers not connected.")
+    results = []
+    placed_at = datetime.now(timezone.utc).isoformat()
+    for o in req.orders:
+        try:
+            r = await asyncio.to_thread(fyers_int.place_order_sync, client, o)
+            broker_ok = isinstance(r, dict) and r.get("s") == "ok"
+            results.append({
+                "symbol": o.symbol, "side": o.side, "qty": o.qty,
+                "ok": broker_ok,
+                "error": None if broker_ok else (r.get("message") if isinstance(r, dict) else str(r))[:240],
+                "order_id": (r or {}).get("id") if isinstance(r, dict) else None,
+                "response": r,
+            })
+        except Exception as e:
+            logger.exception(f"Fyers batch order failed: {o.symbol}")
+            results.append({"symbol": o.symbol, "side": o.side, "qty": o.qty, "ok": False, "error": str(e)[:240]})
+    # Persist a record for audit
+    try:
+        await db.fyers_batch_orders.insert_one({
+            "placed_at": placed_at, "results": results,
+        })
+    except Exception:
+        pass
+    ok_count = sum(1 for r in results if r["ok"])
+    return {
+        "placed_at": placed_at,
+        "total": len(results),
+        "succeeded": ok_count,
+        "failed": len(results) - ok_count,
+        "results": results,
+    }
+
+
 import sys
 
 

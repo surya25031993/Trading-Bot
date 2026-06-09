@@ -143,6 +143,10 @@ export const api = {
   fyersPositions: () => req<any>("/fyers/positions"),
   fyersProfile: () => req<any>("/fyers/profile"),
   fyersOptionChain: (index: string) => req<any>(`/fyers/option-chain?index=${index}`),
+  fyersPlaceOrder: (order: any) =>
+    req<any>("/fyers/orders?live_mode=true", { method: "POST", body: JSON.stringify(order) }),
+  fyersPlaceBatch: (orders: any[]) =>
+    req<any>("/fyers/orders-batch?live_mode=true", { method: "POST", body: JSON.stringify({ orders }) }),
 
   // ============ Options ============
   optionsSuggest: (index: string) => req<OptionSuggestion>(`/options/suggest?index=${index}`),
@@ -186,8 +190,9 @@ export type OptionCalcResult = {
 export type OptionSuggestion = {
   index: string; spot: number; atm: number; lot_size: number;
   consensus: "BUY" | "SELL" | "HOLD"; rsi: number; change_pct: number;
+  expiry?: string; premiums_live?: boolean; live_source?: string;
   strategy: { key: string; name: string; view: string; risk: string; reward: string; description: string };
-  concrete_legs: { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium_est: number; qty: number }[];
+  concrete_legs: { side: "BUY" | "SELL"; type: "CE" | "PE"; strike: number; premium_est: number; qty: number; fyers_symbol?: string; premium_source?: string }[];
   note: string;
 };
 

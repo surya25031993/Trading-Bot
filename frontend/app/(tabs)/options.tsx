@@ -120,6 +120,47 @@ export default function Options() {
     }
   };
 
+  const placeStrategyLive = async () => {
+    if (!sugg) return;
+    const missing = sugg.concrete_legs.filter(l => !l.fyers_symbol);
+    if (missing.length > 0) {
+      setTradeMsg("Live order needs Fyers symbols. Make sure Fyers is connected and try again.");
+      setTimeout(() => setTradeMsg(null), 5000);
+      return;
+    }
+    const lotMultiplier = sugg.lot_size || 1;
+    const orders = sugg.concrete_legs.map(l => ({
+      symbol: l.fyers_symbol!,
+      qty: (l.qty || 1) * lotMultiplier,
+      side: l.side,
+      order_type: "MARKET",
+      product_type: "INTRADAY",
+    }));
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        `Place ${orders.length} REAL Fyers orders for ${sugg.strategy.name} on ${sugg.index}?\n\n` +
+        orders.map(o => `${o.side}  ${o.qty}  ${o.symbol}`).join("\n") +
+        `\n\nThis fires real-money MARKET orders immediately.`
+      );
+      if (!ok) return;
+    }
+    setTradeBusy(true);
+    try {
+      const result: any = await api.fyersPlaceBatch(orders);
+      setTradeMsg(
+        result.failed === 0
+          ? `✓ LIVE: ${result.succeeded}/${result.total} orders placed for ${sugg.strategy.name}`
+          : `⚠ LIVE: ${result.succeeded} succeeded · ${result.failed} failed — check Portfolio/Orders.`
+      );
+      setTimeout(() => setTradeMsg(null), 7000);
+    } catch (e: any) {
+      setTradeMsg(`Live order error: ${(e?.message || "").slice(0, 160)}`);
+      setTimeout(() => setTradeMsg(null), 7000);
+    } finally {
+      setTradeBusy(false);
+    }
+  };
+
   useEffect(() => { load(index); }, [index, load]);
 
   const consensusColor = (c: string) => c === "BUY" ? colors.profit : c === "SELL" ? colors.loss : colors.warning;
@@ -242,20 +283,36 @@ export default function Options() {
               <Text style={styles.note}>{sugg.note}</Text>
             </View>
 
-            {/* Paper trade button */}
-            <View style={styles.tradeRow}>
+            {/* Paper trade + Live order buttons */}
+            <View style={[styles.tradeRow, { flexDirection: "row", gap: 10 }]}>
               <TouchableOpacity
                 testID="paper-trade-strategy"
                 onPress={placeStrategy}
                 disabled={tradeBusy}
-                style={[styles.tradeBtn, { backgroundColor: sugg.consensus === "BUY" ? colors.profit : sugg.consensus === "SELL" ? colors.loss : colors.accent }]}
+                style={[styles.tradeBtn, { flex: 1, backgroundColor: sugg.consensus === "BUY" ? colors.profit : sugg.consensus === "SELL" ? colors.loss : colors.accent }]}
                 activeOpacity={0.8}
               >
                 <Text style={styles.tradeBtnText}>
                   {tradeBusy ? "Placing…" : `Paper Trade ${sugg.strategy.name}`}
                 </Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                testID="live-trade-strategy"
+                onPress={placeStrategyLive}
+                disabled={tradeBusy || !sugg.premiums_live}
+                style={[styles.tradeBtn, { flex: 1, backgroundColor: "transparent", borderWidth: 1.5, borderColor: colors.loss, opacity: sugg.premiums_live ? 1 : 0.4 }]}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.tradeBtnText, { color: colors.loss }]}>
+                  {tradeBusy ? "Placing…" : `⚡ Place LIVE`}
+                </Text>
+              </TouchableOpacity>
             </View>
+            {!sugg.premiums_live && (
+              <Text style={[styles.note, { color: colors.warning, marginTop: 6 }]}>
+                Live order disabled — connect Fyers in Settings to enable real-time order placement.
+              </Text>
+            )}
             {tradeMsg && <Text style={[styles.toast, { color: tradeMsg.startsWith("✓") ? colors.profit : colors.loss }]} testID="trade-toast">{tradeMsg}</Text>}
 
             {/* Live Option Premium Charts (CE + PE) */}
