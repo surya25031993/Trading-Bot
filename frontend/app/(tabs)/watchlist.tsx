@@ -28,6 +28,12 @@ export default function Watchlist() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-refresh every 30s for live watchlist quotes
+  useEffect(() => {
+    const id = setInterval(() => { load(); }, 30000);
+    return () => clearInterval(id);
+  }, [load]);
+
   // Search popular stocks
   useEffect(() => {
     let cancelled = false;

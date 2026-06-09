@@ -101,3 +101,90 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  "This is a trading algo bot. New python code added for quant algorithm — verify it's implemented and fix real-time data not loading."
+
+backend:
+  - task: "Quant indicators (Supertrend, ADX, Stochastic) in compute_indicators"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Verified: 8 signals now returned (SMA, EMA, RSI, MACD, BB, Supertrend(10,3), ADX(14), Stochastic). Endpoint /api/stocks/TCS.NS/signals returns supertrend, supertrend_uptrend, adx, stoch_k, stoch_d fields and matching signals with reason strings."
+
+  - task: "Real-time data loading"
+    implemented: true
+    working: true
+    file: "backend/requirements.txt, backend/.env"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "user"
+        comment: "User reported data not loading in real time."
+      - working: true
+        agent: "main"
+        comment: "Root cause: backend was crashing on startup. Fixed (a) requirements.txt had `emergentintegrations==0.2.0yfinance>=1.4.1` merged without newline — split into separate lines; (b) yfinance, scipy, fyers-apiv3 not installed — pip installed; (c) /app/backend/.env and /app/frontend/.env files missing — recreated with MONGO_URL, DB_NAME, EMERGENT_LLM_KEY, EXPO_PUBLIC_BACKEND_URL. Backend healthy, /api/market/indices and /api/stocks/{sym}/signals returning live yfinance data (NIFTY 23242, SENSEX 73918, BANK NIFTY 55194)."
+
+  - task: "Bot service reason text updated for 8-indicator quant suite"
+    implemented: true
+    working: true
+    file: "backend/bot_service.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Updated reason strings from '/5' to '/8' since Supertrend, ADX, Stochastic added. Mentions quant algos in decisions log."
+
+frontend:
+  - task: "Stock detail screen surfaces new quant indicators"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/stock/[symbol].tsx, frontend/src/api.ts"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Extended IndicatorData type with supertrend, supertrend_uptrend, adx, stoch_k, stoch_d. Indicator grid in stock detail now shows SUPERTREND ↑/↓, ADX(14) and STOCH %K cells when backend returns them."
+
+  - task: "Auto-refresh polling for real-time feel"
+    implemented: true
+    working: "NA"
+    file: "frontend/app/(tabs)/index.tsx, signals.tsx, watchlist.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added setInterval polling — Market 30s, Signals 60s, Watchlist 30s. Quote cache TTL stays 30s server side."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.1"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Quant indicators (Supertrend, ADX, Stochastic) in compute_indicators"
+    - "Real-time data loading"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Fixed root cause of dead backend. requirements.txt had two packages merged on one line preventing yfinance from installing; .env files were missing. Installed yfinance, scipy, fyers-apiv3, recreated .env. Backend healthy. Confirmed all 8 quant signals returned by /api/stocks/{sym}/signals (incl. Supertrend, ADX, Stochastic). Frontend now exposes new indicators on stock detail and auto-polls every 30-60s.

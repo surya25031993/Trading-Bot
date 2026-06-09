@@ -29,6 +29,12 @@ export default function Market() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-refresh every 30s for real-time feel
+  useEffect(() => {
+    const id = setInterval(() => { load(); }, 30000);
+    return () => clearInterval(id);
+  }, [load]);
+
   const onRefresh = () => { setRefreshing(true); load(); };
 
   return (

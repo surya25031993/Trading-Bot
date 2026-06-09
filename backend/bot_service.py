@@ -128,7 +128,7 @@ async def _bot_loop(db, server_module):
                                 "symbol": symbol, "action": "BUY", "price": price, "qty": 0,
                                 "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
                                 "rsi": ind["indicators"]["rsi"],
-                                "reason": f"{ind['buy_count']}/5 BUY — INDEX (use Options tab to trade)",
+                                "reason": f"{ind['buy_count']}/8 BUY — INDEX (use Options tab to trade)",
                             })
                             continue
                         qty = _calc_qty(price)
@@ -138,7 +138,7 @@ async def _bot_loop(db, server_module):
                                 "symbol": symbol, "action": "BUY", "price": price, "qty": qty,
                                 "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
                                 "rsi": ind["indicators"]["rsi"],
-                                "reason": f"{ind['buy_count']}/5 algos BUY",
+                                "reason": f"{ind['buy_count']}/8 algos BUY (Supertrend/ADX/Stoch included)",
                             })
                             today_trade_count += 1
                     elif ind["sell_count"] >= _config["min_sell_signals"] and has_pos:
@@ -148,7 +148,7 @@ async def _bot_loop(db, server_module):
                             "symbol": symbol, "action": "SELL", "price": price, "qty": held_qty,
                             "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
                             "rsi": ind["indicators"]["rsi"],
-                            "reason": f"{ind['sell_count']}/5 algos SELL",
+                            "reason": f"{ind['sell_count']}/8 algos SELL (Supertrend/ADX/Stoch included)",
                         })
                         today_trade_count += 1
                     else:
@@ -156,7 +156,7 @@ async def _bot_loop(db, server_module):
                             "symbol": symbol, "action": "HOLD", "price": price, "qty": 0,
                             "buy_count": ind["buy_count"], "sell_count": ind["sell_count"],
                             "rsi": ind["indicators"]["rsi"],
-                            "reason": f"{ind['buy_count']}B/{ind['sell_count']}S — no consensus" + (" (already holding)" if has_pos else ""),
+                            "reason": f"{ind['buy_count']}B/{ind['sell_count']}S of 8 — no consensus" + (" (already holding)" if has_pos else ""),
                         })
                 except Exception as e:
                     logger.exception(f"Bot scan error for {symbol}")

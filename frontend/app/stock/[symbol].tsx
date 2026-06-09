@@ -181,6 +181,18 @@ export default function StockDetail() {
               <Indicator label="SMA50" value={`₹${ind.indicators.sma50.toFixed(0)}`} />
               <Indicator label="BB Low" value={`₹${ind.indicators.bb_lower.toFixed(0)}`} />
               <Indicator label="BB High" value={`₹${ind.indicators.bb_upper.toFixed(0)}`} />
+              {ind.indicators.supertrend !== undefined && (
+                <Indicator
+                  label={`SUPERTREND ${ind.indicators.supertrend_uptrend ? "↑" : "↓"}`}
+                  value={`₹${ind.indicators.supertrend.toFixed(0)}`}
+                />
+              )}
+              {ind.indicators.adx !== undefined && (
+                <Indicator label="ADX(14)" value={ind.indicators.adx.toFixed(1)} />
+              )}
+              {ind.indicators.stoch_k !== undefined && (
+                <Indicator label="STOCH %K" value={ind.indicators.stoch_k.toFixed(1)} />
+              )}
             </View>
           </View>
         )}

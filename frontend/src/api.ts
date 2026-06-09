@@ -28,6 +28,8 @@ export type IndicatorData = {
   indicators: {
     rsi: number; macd: number; macd_signal: number; macd_hist: number;
     sma20: number; sma50: number; bb_upper: number; bb_lower: number; price: number;
+    supertrend?: number; supertrend_uptrend?: boolean;
+    adx?: number; stoch_k?: number; stoch_d?: number;
   };
   signals: Signal[];
   consensus: "BUY" | "SELL" | "HOLD";

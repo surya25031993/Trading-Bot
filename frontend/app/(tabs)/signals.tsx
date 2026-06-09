@@ -32,6 +32,12 @@ export default function Signals() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-refresh every 60s for real-time feel
+  useEffect(() => {
+    const id = setInterval(() => { load(); }, 60000);
+    return () => clearInterval(id);
+  }, [load]);
+
   const filtered = filter === "ALL" ? rows : rows.filter((r) => r.consensus === filter);
   const chips = ["ALL", "BUY", "SELL", "HOLD"] as const;
 
@@ -39,7 +45,7 @@ export default function Signals() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
         <Text style={styles.title}>Algo Signals</Text>
-        <Text style={styles.subtitle}>SMA • EMA • RSI • MACD • Bollinger</Text>
+        <Text style={styles.subtitle}>SMA · EMA · RSI · MACD · BB · Supertrend · ADX · Stoch</Text>
       </View>
 
       <ScrollView
