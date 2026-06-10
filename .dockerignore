@@ -1,0 +1,14 @@
+**/.git
+**/__pycache__
+**/.venv
+**/node_modules
+**/dist
+**/.expo
+**/.metro-cache
+**/.next
+**/.idea
+**/.vscode
+**/.DS_Store
+*.log
+/tests
+/.emergent

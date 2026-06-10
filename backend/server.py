@@ -3493,6 +3493,37 @@ app.add_middleware(
 )
 
 
+# ============ Serve frontend static bundle (for single-container deployment) ============
+# When deployed to Hugging Face Spaces / Render / etc, the backend also serves
+# the React Native Web bundle from /app/frontend/dist so we don't need a separate
+# static host. In local dev, this is a no-op (the static `serve` package handles it).
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_FRONTEND_DIST = Path("/app/frontend/dist")
+if _FRONTEND_DIST.exists() and os.environ.get("SERVE_FRONTEND", "0") == "1":
+    # Serve the Expo web bundle assets
+    if (_FRONTEND_DIST / "_expo").exists():
+        app.mount("/_expo", StaticFiles(directory=str(_FRONTEND_DIST / "_expo")), name="expo-static")
+    if (_FRONTEND_DIST / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        # API routes already handled above by the router; this is for everything else.
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        # Try exact file
+        candidate = _FRONTEND_DIST / full_path
+        if candidate.is_file():
+            return FileResponse(str(candidate))
+        # SPA fallback to index.html
+        index = _FRONTEND_DIST / "index.html"
+        if index.exists():
+            return FileResponse(str(index))
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
