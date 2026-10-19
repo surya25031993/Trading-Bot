@@ -43,3 +43,5 @@ threadpoolctl>=3.5.0
 narwhals>=1.0.0
 websocket-client>=1.6.1
 aws-lambda-powertools>=1.25.0
+# Local Windows MT5 terminal integration (signal-only agent)
+MetaTrader5>=5.0.45
